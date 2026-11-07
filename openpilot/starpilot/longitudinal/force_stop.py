@@ -141,7 +141,7 @@ class ForceStop:
     permitted = (available and now >= self.override_until_ns and not frame.driving_in_curve and not turn and
                  not frame.tracking_lead and not lead)
     model_path = frame.light and model_active and permitted and not curved
-    sign_path = frame.sign and permitted and speed < SIGN_MAX_SPEED_MPS and horizon < SIGN_MODEL_AGREE_M
+    sign_path = frame.sign and permitted and speed < SIGN_MAX_SPEED_MPS and (horizon < SIGN_MODEL_AGREE_M or self.forcing)
     if sign_path:
       self.sign_confirmed = True
     active = model_path or sign_path
@@ -232,7 +232,7 @@ class ForceStop:
         self.distance_cap = max(0.0, self.distance_cap - speed * dt)
         self.distance = min(self.distance, self.distance_cap + 15 * min(self.distance_cap / 60, 1))
         if frame.sign and available:
-          if horizon < SIGN_MODEL_AGREE_M:
+          if horizon < SIGN_MODEL_AGREE_M or self.sign_confirmed:
             self.distance = min(self.distance, SIGN_SEED_M)
         effective = self.distance + offset + tune.distance_bias_m
         decel = SIGN_APPROACH_DECEL if frame.sign else MODEL_APPROACH_DECEL

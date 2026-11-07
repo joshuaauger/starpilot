@@ -244,6 +244,23 @@ class ForceStopTests(unittest.TestCase):
     plan = self.owner.step(frame(50, speed_mps=8., horizon_m=20., sign=True), self.tune)
     self.assertLessEqual(plan.tracked_distance_m, previous.tracked_distance_m)
 
+  def test_sign_latches_and_seeds_over_long_path_once_light_committed(self):
+    for tick in range(15):
+      plan = self.owner.step(frame(tick, horizon_m=60.), self.tune)
+    self.assertTrue(plan.forcing)
+    self.assertGreater(plan.tracked_distance_m, 50.)
+    plan = self.owner.step(frame(15, horizon_m=60., sign=True), self.tune)
+    self.assertTrue(self.owner.sign_confirmed)
+    self.assertLessEqual(plan.tracked_distance_m, 27.)
+    plan = self.owner.step(frame(16, horizon_m=60., light=False), self.tune)
+    self.assertLess(plan.tracked_distance_m, 27.)
+
+  def test_long_path_sign_alone_does_not_commit(self):
+    for tick in range(20):
+      plan = self.owner.step(frame(tick, horizon_m=60., light=False, sign=True), self.tune)
+    self.assertFalse(plan.forcing)
+    self.assertFalse(self.owner.sign_confirmed)
+
   def test_positive_offset_keeps_stop_target_until_native_stop(self):
     for tick in range(40):
       plan = self.owner.step(frame(tick, horizon_m=12.), self.tune, 8)

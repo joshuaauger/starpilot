@@ -166,6 +166,14 @@ class ModelTurnAssist:
     self.curvature = 0.0
     self.turn_hold_done = False
 
+  def update_stopped(self, CS, new_desired_curvature):
+    if CS.leftBlinker or CS.rightBlinker or self.output_curvature is None:
+      self.reset()
+      return new_desired_curvature
+    if CS.steeringPressed:
+      self.output_curvature = self.curvature
+    return self.output_curvature
+
   def update(self, CS, model_v2, CC, new_desired_curvature):
     blinker_dir = float(CS.rightBlinker) - float(CS.leftBlinker)
     stop_dist = stopping_distance(CS.vEgo, CS.aEgo)

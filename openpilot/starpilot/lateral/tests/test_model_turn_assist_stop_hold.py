@@ -101,6 +101,22 @@ class TestTwitchGuardArming(unittest.TestCase):
     assist = ModelTurnAssist()
     self.assertEqual(step(assist, 3.0, -.2, .012, model=LONG_STRAIGHT), .012)
 
+  def test_standstill_keeps_last_command_instead_of_raw_model(self):
+    assist = ModelTurnAssist()
+    assist.twitch_guard_armed = True
+    self.assertEqual(step(assist, 1.0, 0., .012, model=LONG_STRAIGHT), TWITCH_GUARD_FLOOR)
+    self.assertEqual(assist.update_stopped(car(0., 0.), .012), TWITCH_GUARD_FLOOR)
+    assist.curvature = -.004
+    self.assertEqual(assist.update_stopped(car(0., 0., pressed=True), .012), -.004)
+    self.assertEqual(assist.update_stopped(car(0., 0.), .012), -.004)
+
+  def test_standstill_passes_raw_model_with_blinker_or_no_history(self):
+    self.assertEqual(ModelTurnAssist().update_stopped(car(0., 0.), .012), .012)
+    assist = ModelTurnAssist()
+    step(assist, 1.0, 0., .003)
+    self.assertEqual(assist.update_stopped(car(0., 0., blinker=1), .012), .012)
+    self.assertIsNone(assist.output_curvature)
+
   def test_blinker_disarms_guard(self):
     assist = ModelTurnAssist()
     assist.twitch_guard_armed = True

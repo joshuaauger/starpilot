@@ -15,6 +15,13 @@ SIGN_SEED_M = 27.0
 SIGN_ESTIMATE_HOLD_NS = 2_000_000_000
 SIGN_APPROACH_DECEL = 1.0
 MODEL_APPROACH_DECEL = .65
+# Stopped behind a car at a sign: the line is assumed one car length past that car's rear.
+QUEUE_LEAD_MAX_M = 8.0
+QUEUE_LEAD_LENGTH_M = 4.5
+# A car still inside this margin past the line may just be moving up the queue, not through the intersection.
+QUEUE_CLEAR_M = 5.0
+QUEUE_SIGN_RECENT_NS = 10_000_000_000
+QUEUE_MAX_SPEED_MPS = 6.0
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,8 @@ class ForceStop:
     self.previously_enabled = False
     self.distance = 0.0
     self.distance_cap = 0.0
+    self.queue_sign_ns = 0
+    self.queue_line = None
     self._clear_sign_estimate()
 
   def _clear_sign_estimate(self):
@@ -127,6 +136,20 @@ class ForceStop:
       self.sign_evidence_ns = now
     estimates = [value for value in (self.dash_distance, self.vision_distance) if value is not None]
     return sum(estimates) / len(estimates) if estimates else None
+
+  def _queue_step(self, frame: StopFrame, now: int, travel: float, lead_blocked: bool):
+    if frame.sign and lead_blocked:
+      self.queue_sign_ns = now
+    queued_lead = frame.lead_present and frame.lead_speed_mps < 1.0 and frame.lead_distance_m < QUEUE_LEAD_MAX_M
+    arm = frame.standstill and self.queue_sign_ns and now - self.queue_sign_ns <= QUEUE_SIGN_RECENT_NS
+    if queued_lead and (arm or self.queue_line is not None):
+      self.queue_line = frame.lead_distance_m + QUEUE_LEAD_LENGTH_M
+    elif self.queue_line is not None:
+      self.queue_line -= travel
+    if self.queue_line is not None and (frame.pedal_override or frame.resume_requested or self.queue_line <= 0 or
+                                        frame.speed_mps > QUEUE_MAX_SPEED_MPS):
+      self.queue_line = None
+      self.queue_sign_ns = 0
 
   def _clear_standstill(self):
     self.standstill_since_ns = 0
@@ -157,7 +180,9 @@ class ForceStop:
       return StopPlan()
     available = frame.perception_available
     sign_estimate = self._sign_estimate(frame, now, max(0.0, speed) * dt)
-    if available and (frame.light or frame.raw_model_stopped) or frame.sign:
+    lead = (frame.lead_present and frame.lead_distance_m < tune.lead_veto_m and frame.lead_speed_mps < speed + 2)
+    self._queue_step(frame, now, max(0.0, speed) * dt, lead or frame.tracking_lead)
+    if available and (frame.light or frame.raw_model_stopped) or frame.sign or self.queue_line is not None:
       if not frame.standstill:
         self.stop_seen_ns = now
     if frame.standstill:
@@ -165,16 +190,19 @@ class ForceStop:
     stop_then_turn = bool(self.stop_seen_ns and now - self.stop_seen_ns < 4_000_000_000)
     turn = speed <= 18 * 0.44704 and frame.blinker and abs(frame.steering_angle_deg) >= 25 and not stop_then_turn
     curved = available and abs(curvature) >= .003 and not stop_then_turn
-    lead = (frame.lead_present and frame.lead_distance_m < tune.lead_veto_m and frame.lead_speed_mps < speed + 2)
     model_active = available and horizon < (108.0 if self.activation_gate and frame.light else 100.0)
     self.activation_gate = model_active and frame.light
     permitted = (available and now >= self.override_until_ns and not frame.driving_in_curve and not turn and
                  not frame.tracking_lead and not lead)
     model_path = frame.light and model_active and permitted and not curved
     sign_path = frame.sign and permitted and speed < SIGN_MAX_SPEED_MPS and (horizon < SIGN_MODEL_AGREE_M or self.forcing)
-    if sign_path:
+    line_blocked = (self.queue_line is not None and frame.lead_present and
+                    frame.lead_distance_m < self.queue_line + QUEUE_CLEAR_M)
+    queue_path = (self.queue_line is not None and not line_blocked and not frame.standstill and available and
+                  now >= self.override_until_ns and not frame.driving_in_curve and not turn)
+    if sign_path or queue_path:
       self.sign_confirmed = True
-    active = model_path or sign_path
+    active = model_path or sign_path or queue_path
     if model_path:
       self.from_light = True
       self.light_clear_ns = 0
@@ -213,7 +241,7 @@ class ForceStop:
     if not available and not self.forcing:
       self.timer = 0
     elif active and not frame.standstill:
-      self.timer = min(2.0, self.timer + (SIGN_CONFIRM_STEP_S if frame.sign else DT_MDL))
+      self.timer = min(2.0, self.timer + (SIGN_CONFIRM_STEP_S if frame.sign or queue_path else DT_MDL))
     elif turn and not self.forcing and not frame.standstill:
       self.timer = 0
     elif held:
@@ -264,6 +292,8 @@ class ForceStop:
         self.distance = min(self.distance, cap)
         if sign_estimate is not None and (self.sign_confirmed or frame.sign and available and horizon < SIGN_MODEL_AGREE_M):
           self.distance = min(sign_estimate, cap)
+        if self.queue_line is not None and self.sign_confirmed:
+          self.distance = self.queue_line
         effective = self.distance + offset + tune.distance_bias_m
         decel = SIGN_APPROACH_DECEL if frame.sign else MODEL_APPROACH_DECEL
         ceiling = math.sqrt(2 * decel * max(0, effective - tune.handoff_m))

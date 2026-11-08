@@ -289,6 +289,62 @@ class ForceStopTests(unittest.TestCase):
       self.assertLess(plan.tracked_distance_m, 30.)
     self.assertIsNone(self.owner.vision_distance)
 
+  def queue_behind_lead(self, sign=True):
+    for tick in range(10):
+      plan = self.owner.step(frame(tick, speed_mps=8., horizon_m=45., light=False, sign=sign, lead_present=True,
+                                   lead_distance_m=20., lead_speed_mps=0.), self.tune)
+      self.assertFalse(plan.forcing)
+    for tick in range(10, 30):
+      plan = self.owner.step(frame(tick, speed_mps=0., horizon_m=5., light=False, standstill=True, lead_present=True,
+                                   lead_distance_m=5., lead_speed_mps=0.), self.tune)
+      self.assertFalse(plan.forcing)
+
+  def test_sign_behind_stopped_lead_stops_at_line_after_lead_leaves(self):
+    self.queue_behind_lead()
+    self.assertAlmostEqual(self.owner.queue_line, 9.5)
+    for tick in range(30, 35):
+      plan = self.owner.step(frame(tick, speed_mps=0., horizon_m=12., light=False, standstill=True, lead_present=True,
+                                   lead_distance_m=7., lead_speed_mps=3.), self.tune)
+      self.assertFalse(plan.forcing)
+    for tick in range(35, 45):
+      plan = self.owner.step(frame(tick, speed_mps=1., horizon_m=15., light=False), self.tune)
+    self.assertTrue(plan.forcing)
+    self.assertTrue(self.owner.sign_confirmed)
+    self.assertAlmostEqual(plan.tracked_distance_m, 9.5 - 10 * .05)
+    for tick in range(45, 100):
+      plan = self.owner.step(frame(tick, speed_mps=0., horizon_m=15., light=False, standstill=True), self.tune)
+      self.assertTrue(plan.manual_hold)
+    released = self.owner.step(frame(100, speed_mps=0., horizon_m=15., light=False, standstill=True,
+                                     pedal_override=True), self.tune)
+    self.assertFalse(released.manual_hold)
+    self.assertIsNone(self.owner.queue_line)
+
+  def test_lead_stop_without_sign_is_not_remembered(self):
+    self.queue_behind_lead(sign=False)
+    self.assertIsNone(self.owner.queue_line)
+    for tick in range(30, 50):
+      plan = self.owner.step(frame(tick, speed_mps=1., horizon_m=15., light=False), self.tune)
+      self.assertFalse(plan.forcing)
+
+  def test_lead_moving_up_the_queue_is_followed_not_stopped_for(self):
+    self.queue_behind_lead()
+    for tick in range(30, 60):
+      plan = self.owner.step(frame(tick, speed_mps=1., horizon_m=15., light=False, lead_present=True,
+                                   lead_distance_m=6., lead_speed_mps=1.5), self.tune)
+      self.assertFalse(plan.forcing)
+    plan = self.owner.step(frame(60, speed_mps=0., horizon_m=5., light=False, standstill=True, lead_present=True,
+                                 lead_distance_m=4., lead_speed_mps=0.), self.tune)
+    self.assertFalse(plan.forcing)
+    self.assertAlmostEqual(self.owner.queue_line, 8.5)
+
+  def test_driver_gas_while_queued_forgets_the_sign(self):
+    self.queue_behind_lead()
+    self.owner.step(frame(30, speed_mps=0., horizon_m=5., light=False, standstill=True, pedal_override=True), self.tune)
+    self.assertIsNone(self.owner.queue_line)
+    for tick in range(31, 50):
+      plan = self.owner.step(frame(tick, speed_mps=1., horizon_m=15., light=False), self.tune)
+      self.assertFalse(plan.forcing)
+
   def test_positive_offset_keeps_stop_target_until_native_stop(self):
     for tick in range(40):
       plan = self.owner.step(frame(tick, horizon_m=12.), self.tune, 8)

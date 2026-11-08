@@ -21,7 +21,7 @@ from openpilot.starpilot.ui.onroad_customization import (CAMERA_WIDGETS, PROFILE
                                                          validate_document, widget_size)
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.curve_speed.status import CurveObservation
-from openpilot.starpilot.ui.onroad_state import ConditionalLead
+from openpilot.starpilot.ui.onroad_state import ConditionalLead, speed_limit_bounds
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SourceReading, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
 from openpilot.starpilot.ui.onroad_dm import draw_monitor_art, monitor_bounds, monitor_visible
@@ -81,7 +81,7 @@ def sample_state(scene: str, document: dict) -> OnroadState:
                      speed_limit=SpeedLimitObservation(kind=ObservationKind.VALID, source="dashboard",
                                                        speed_limit_mps=22.0 if pending else 20.0,
                                                        accepted_speed_limit_mps=20.0, accepted_source='dashboard',
-                                                       accepted_adjusted_limit_mps=22.0, effective_cluster_target_mps=22.0,
+                                                       accepted_adjusted_limit_mps=22.0, effective_cluster_target_mps=22.0, effective_cap_mps=22.0,
                                                        offset_mps=2.0, limiting_max_set=True,
                                                        pending_adjusted_limit_mps=24.0 if pending else None,
                                                        presentation_adjusted_limit_mps=24.0 if pending else 22.0,
@@ -341,10 +341,13 @@ class _Canvas:
       crop_y = max(0, math.floor(position['y'] - widget.get('visualInsetTop', 0)))
       offset_x, offset_y = crop_x - position['x'], crop_y - position['y']
       width, height = math.ceil(logical_width - offset_x), math.ceil(logical_height - offset_y)
-      if self.profile == Profile.COMPACT and key == 'speed_limit':
-        crop_x = max(0, math.floor(position['x'] - 2))
-        offset_x = crop_x - position['x']
-        width = math.ceil(logical_width + 2 - offset_x)
+      if (key == ('speed_limit' if self.profile == Profile.COMPACT else 'cruise_limits') and
+          state.speed_limit.pending_speed_limit_mps is None and (area := speed_limit_bounds(self.profile, state)) is not None):
+        # The existing padded touch area includes the raised and SET-limited outlines.
+        crop_x, crop_y = max(0, math.floor(min(crop_x, area[0]))), max(0, math.floor(min(crop_y, area[1])))
+        width = math.ceil(max(position['x'] + logical_width, area[2]) - crop_x)
+        height = math.ceil(max(position['y'] + logical_height, area[3]) - crop_y)
+        offset_x, offset_y = crop_x - position['x'], crop_y - position['y']
       if state.speed_limit.pending_speed_limit_mps is not None and (area := widget.get('confirmation')) is not None:
         crop_x = math.floor(min(crop_x, position['x'] + area['x']))
         crop_y = math.floor(min(crop_y, position['y'] + area['y']))

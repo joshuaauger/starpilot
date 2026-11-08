@@ -22,7 +22,8 @@ OVERRIDE = rl.Color(214, 188, 240, 255)
 REJECT = rl.Color(242, 139, 139, 255)
 SOURCE_LABELS = {'dashboard': 'DASH', 'map': 'OSM', 'vision': 'VISION', 'mapbox': 'NAV'}
 NUMBER_SIZE, HEADING_SIZE = 70, 26
-HEADING_ROW, NUMBER_ROW, SOURCE_ROW = 25, 68, 120
+# Ink-centered rows, shared by SET, the portrait sign and the confirmation notice.
+HEADING_ROW, NUMBER_ROW, SOURCE_ROW = 16.75, 61, 114.5
 
 
 def draw_text(fonts, text, role, size, x, y, color=INK):
@@ -58,7 +59,7 @@ def draw_set_speed(fonts, shown, center, top, color):
   scale = LARGE_SIGN_SCALE if fonts.profile == Profile.LARGE else 1.
   text_scale = scale * Profile.COMPACT.font_scale / fonts.profile.font_scale
   draw_speed_row(fonts, 'SET', FontRole.SEMI_BOLD, HEADING_SIZE * text_scale, center,
-                 top + HEADING_ROW * scale, color, 'H')
+                 top + HEADING_ROW * scale, color, 'SET')
   if shown.max_text == '–':
     draw_line(fonts.profile, rl.Vector2(center - 20 * scale, top + NUMBER_ROW * scale),
               rl.Vector2(center + 20 * scale, top + NUMBER_ROW * scale), 5 * scale, color)
@@ -206,7 +207,7 @@ class SpeedLimitWidget:
     direction = (-1 if target > state.speed_mps else 1) if target is not None and state.speed_mps is not None and target != state.speed_mps else 0
     start = (width - label_width - (19.2 if direction else 0)) / 2
     draw_speed_row(self.fonts, source, FontRole.SEMI_BOLD, text_size(label_size),
-                   x + (start + label_width / 2) * scale, content_top + HEADING_ROW * scale, source_color, 'H')
+                   x + (start + label_width / 2) * scale, content_top + HEADING_ROW * scale, source_color, source)
     if direction:
       self.shapes.arrow('compact', x + (start + label_width + 12.6) * scale, content_top + (HEADING_ROW + .5) * scale,
                         direction, source_color, scale=1.1 * scale)
@@ -245,9 +246,8 @@ class SpeedLimitWidget:
 
   def _sign(self, state: OnroadState, bounds, now: float) -> None:
     shown, obs = resolve_unified_speed(state), state.speed_limit
-    last = shown.posted_retained or obs.sign_recovering
     heading = SOURCE_LABELS.get(shown.source, 'SPEED')
-    if last:
+    if shown.show_last:
       heading = f'LAST {heading}' if heading != 'SPEED' else 'LAST'
     x, top = bounds[0] + 12, bounds[1] + 12
     scale = self.scale
@@ -273,7 +273,7 @@ class SpeedLimitWidget:
       return origin + left * scale, y + a * scale, origin + right * scale, y + b * scale
 
     vienna_center_y = 67
-    mutcd_center_y = SIGN_HEIGHT / 2
+    mutcd_center_y = SIGN_HEIGHT / 2 - 7
 
     def circle_fits(left, right, a, b):
       return all((px - 59) ** 2 + (py - vienna_center_y) ** 2 <= 46 ** 2
@@ -281,14 +281,17 @@ class SpeedLimitWidget:
 
     vienna = state.appearance.use_vienna_sign
     sign_center_y = vienna_center_y if vienna else mutcd_center_y
-    active_text = shown.override_text
+    active_text = shown.override_text or (shown.limit_text if shown.set_limited else None)
     if shown.slc_target_text is not None and (not shown.limit_in_use or shown.slc_target_text != shown.posted_text):
       active_text = active_text or shown.slc_target_text
     pedal = speed_status(state, self.profile, shown) == 'PEDAL'
     if (active_text is not None or pedal or shown.limit_in_use and not vienna) and not shown.pending:
       # Driver targets are rectangular readouts, never regulatory red-ring signs.
-      self.shapes.outline(x + center_x * scale, top + mutcd_center_y * scale, IN_USE if shown.limit_in_use else white)
-      label = 'Override' if shown.override_text is not None else 'Limit'
+      if shown.set_limited:
+        self.shapes.outline(x + center_x * scale, top + 70 * scale, white, scale=scale * 13 / 12)
+      else:
+        self.shapes.outline(x + center_x * scale, top + mutcd_center_y * scale, IN_USE if shown.limit_in_use else white)
+      label = 'Override' if shown.override_text is not None else 'LIMIT'
       active_text = active_text or shown.slc_target_text or shown.posted_text
       target_rows = (('Pedal', FontRole.SEMI_BOLD, 44, 68, OVERRIDE),) if pedal else (
           (label, FontRole.SEMI_BOLD, HEADING_SIZE, HEADING_ROW, OVERRIDE if label == 'Override' else white),
@@ -297,16 +300,15 @@ class SpeedLimitWidget:
       detail = f'{heading} {posted}' if pedal or shown.override_text is not None or active_text != shown.posted_text else heading
       left, right, _, _ = ink(detail, FontRole.MEDIUM, 22)
       source_rows = ((detail, FontRole.MEDIUM, 22, SOURCE_ROW, secondary),) if detail == heading or right - left <= 108 else (
-          (heading, FontRole.SEMI_BOLD, 18, 106, secondary), (posted, FontRole.MEDIUM, 20, 125, secondary))
+          (heading, FontRole.SEMI_BOLD, 18, 99, secondary), (posted, FontRole.MEDIUM, 20, 118, secondary))
+      if shown.set_limited:
+        source_rows = (('SET IS LOW', FontRole.SEMI_BOLD, 20, 103.5, white),
+                       ('RAISE SET', FontRole.SEMI_BOLD, 22, 124.5, white))
       for value, role, size, cy, color in (*target_rows, *source_rows):
         left, right, _, _ = ink(value, role, size)
-        size *= min(1, 108 / max(1, right - left))
-        _, _, a, b = ink(value, role, size)
-        if role == FontRole.SET_SPEED or value in ('Limit', 'Override'):
-          draw_speed_row(self.fonts, value, role, size * self.text_scale, x + center_x * scale, top + cy * scale,
-                         color, '0123456789' if role == FontRole.SET_SPEED else 'H')
-        else:
-          centered(value, role, size, cy - (b - a) / 2, color)
+        size *= min(1, (118 if shown.set_limited else 108) / max(1, right - left))
+        draw_speed_row(self.fonts, value, role, size * self.text_scale, x + center_x * scale, top + cy * scale,
+                       color, '0123456789' if role == FontRole.SET_SPEED else value)
       return
 
     color = white

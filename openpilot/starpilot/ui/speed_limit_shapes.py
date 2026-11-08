@@ -67,8 +67,8 @@ class SpeedLimitShapes:
       self._draw(name, x + dx, y + dy, rl.Color(6, 14, 10, 230), scale=scale)
     self._draw(name, x, y, color, scale=scale)
 
-  def outline(self, x, y, color):
-    self._outlined('outline', x, y, color)
+  def outline(self, x, y, color, *, scale=None):
+    self._outlined('outline', x, y, color, scale=scale)
 
   def button(self, x, y, color, *, profile, scale, pressed=False):
     self._draw(f'button_{profile}' + ('_pressed' if pressed else ''), x, y, color, scale=scale)

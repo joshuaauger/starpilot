@@ -385,7 +385,8 @@ def test_retired_fallback_cannot_reset_session_or_change_set_speed_sign_and_reco
   _, view, target = drive.step(1000, status='noCoverage')
   shown = resolve_unified_speed(view)
   assert target == pytest.approx(45, abs=1e-4)
-  assert (shown.max_text, shown.posted_text, shown.source, shown.status) == ('50', '45', 'map', 'Unavailable')
+  assert (shown.max_text, shown.posted_text, shown.source, shown.status) == ('50', '45', 'map', 'Using speed limit')
+  assert shown.limit_in_use and not shown.show_last
   assert not view.speed_limit.driver_override_active
   recovered, view, target = drive.step(1100)
   assert not view.speed_limit.driver_override_active
@@ -395,7 +396,7 @@ def test_retired_fallback_cannot_reset_session_or_change_set_speed_sign_and_reco
 
 @pytest.mark.parametrize('loss', ['noCoverage', 'noMatch', 'noGps', 'matchedNoLimit', 'missingTile',
                                  'lookahead', 'stopped', 'deadTransport', 'externalGpsStale'])
-def test_maps_loss_keeps_latest_display_independent_of_control_fallback(tmp_path, loss):
+def test_maps_loss_keeps_accepted_target_display_and_control(tmp_path, loss):
   drive = RetentionDrive(tmp_path)
   drive.step(0)
   changes = {'status': loss}
@@ -415,7 +416,8 @@ def test_maps_loss_keeps_latest_display_independent_of_control_fallback(tmp_path
   assert output.message.slcState.acceptedAdjustedLimit == pytest.approx(45 * MPH)
   assert view.speed_limit.kind != ObservationKind.VALID
   shown = resolve_unified_speed(view)
-  assert (shown.max_text, shown.posted_text, shown.status) == ('70', '45', 'Unavailable')
+  assert (shown.max_text, shown.posted_text, shown.status) == ('70', '45', 'Using speed limit')
+  assert shown.limit_in_use and not shown.show_last
   assert all(slc_controls(profile, view) == () for profile in Profile)
   assert not output.message.slcState.hasPending
 
@@ -431,7 +433,7 @@ def test_long_gap_confirmation_and_recovery_keep_the_accepted_limit(tmp_path, an
   assert target == pytest.approx(45, rel=0, abs=1e-4)
   _, view, target = drive.step(35_000, received=False)
   assert target == pytest.approx(45, rel=0, abs=1e-4)
-  assert resolve_unified_speed(view).status == 'Unavailable'
+  assert resolve_unified_speed(view).status == 'Using speed limit'
   pending, _, target = drive.step(40_000, limit=limit, wayId=124)
   assert target == pytest.approx(45, rel=0, abs=1e-4) and pending.message.slcState.hasPending
   action = None if answer == 'timeout' else Action(drive.runtime.session_id, 2, pending.message.slcState.decisionId,
@@ -440,7 +442,10 @@ def test_long_gap_confirmation_and_recovery_keep_the_accepted_limit(tmp_path, an
   output, view, target = drive.step(300_000, received=False)
   assert target == pytest.approx(limit if answer == 'accept' else 45, rel=0, abs=1e-4)
   assert not output.message.slcState.hasPending
-  assert resolve_unified_speed(view).posted_text == str(limit)
+  shown = resolve_unified_speed(view)
+  assert shown.posted_text == str(limit if answer == 'accept' else 45)
+  assert shown.limit_in_use and not shown.show_last
+  assert view.speed_limit.last_received_speed_limit_mps == pytest.approx(limit * MPH)
   # A dead SLC publisher cannot make the widget claim retained control indefinitely.
   drive.ui.sm.alive['slcState'] = False
   expired = drive.adapter.build(ShellMode.ONROAD, now_ns=NOW + 300_001_000_000).onroad
@@ -482,17 +487,31 @@ def test_returned_map_limit_still_requires_confirmation_when_set_is_unaligned(tm
   assert target == pytest.approx(70, rel=0, abs=1e-4)
 
 
-def test_retention_respects_lower_max_and_reset(tmp_path):
+@pytest.mark.parametrize('offset', [0, 5, 10])
+def test_retention_respects_lower_max_and_reset(tmp_path, offset):
   drive = RetentionDrive(tmp_path / 'max')
+  params = Params(str(tmp_path / 'max'))
+  document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0, 0, 0, offset * MPH, 0, 0, 0))
+  params.put('SLCOffsetSchedule', od.to_value(document), block=True)
+  drive.runtime = Runtime(read_params(params))
   drive.step(0)
   drive.sm['carState'].vCruise = drive.sm['carState'].vCruiseCluster = 40 * MPH * 3.6
-  _, view, target = drive.step(300, received=False)
+  _, before, _ = drive.step(50)
+  _, view, target = drive.step(350, received=False)
   assert target == pytest.approx(40, rel=0, abs=1e-4)
-  assert resolve_unified_speed(view).status == 'Unavailable'
+  shown = resolve_unified_speed(view)
+  assert view.speed_limit.kind != ObservationKind.VALID and shown.posted_retained
+  assert shown.status == 'Using set speed'
+  assert shown.set_limited and not shown.show_last
+  assert replace(shown, posted_retained=False) == resolve_unified_speed(before)
+  _, recovered, target = drive.step(400)
+  assert recovered.speed_limit.sign_recovering
+  assert resolve_unified_speed(recovered) == resolve_unified_speed(before)
+  assert target == pytest.approx(40, rel=0, abs=1e-4)
   drive.runtime.reset()
-  output, _, target = drive.step(400, received=False)
+  output, _, target = drive.step(450, received=False)
   assert output.message.slcState.hasAccepted
-  assert output.result.ceiling.speed_mps == pytest.approx(45 * MPH)
+  assert output.result.ceiling.speed_mps == pytest.approx((45 + offset) * MPH)
   assert target == pytest.approx(40, rel=0, abs=1e-4)
 
 

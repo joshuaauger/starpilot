@@ -560,7 +560,7 @@ def test_large_draw_origins_and_wheel_input_move_together():
   with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card, patch.object(rl, "draw_line_ex"):
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     card.assert_not_called()
-    assert foreground_calls(fonts.draw)[0].args[3:5] == pytest.approx((275, 117.14), abs=.01)
+    assert foreground_calls(fonts.draw)[0].args[3:5] == pytest.approx((275, 106.07), abs=.01)
   CurrentSpeedHud(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
   assert foreground_calls(fonts.draw)[-2].args[3:5] == (965, 112)
   wheel = SteeringWheelWidget(Path('/unused'))
@@ -593,7 +593,7 @@ def test_frozen_default_draw_geometry_and_neutral_colors():
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     card.assert_not_called()
     assert fonts.draw.call_args_list[0].args[0] == 'SET'
-    assert foreground_calls(fonts.draw)[0].args[3:5] == pytest.approx((175, 97.14), abs=.01)
+    assert foreground_calls(fonts.draw)[0].args[3:5] == pytest.approx((175, 86.07), abs=.01)
   CurrentSpeedHud(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
   assert foreground_calls(fonts.draw)[-2].args[3:5] == (925, 72)
   assert foreground_calls(fonts.draw)[-1].args[3:5] == pytest.approx((925, 215.2))
@@ -619,9 +619,9 @@ def test_compact_us_sign_keeps_camera_visible_at_saved_position(speed):
     hud._speed_limit_sign(state)
   fill.assert_not_called()
   outline.assert_called_once()
-  assert outline.call_args.args[:2] == (264, 102)
+  assert outline.call_args.args[:2] == (264, 95)
   assert [call.args[0] for call in foreground_calls(fonts.draw)] == ['SPEED', str(speed)]
-  assert foreground_calls(fonts.draw)[0].args[3:5] == (259, 46)
+  assert foreground_calls(fonts.draw)[0].args[3:5] == (259, 38)
 
 
 def test_compact_drag_keeps_animation_state_and_separate_origins():
@@ -637,7 +637,7 @@ def test_compact_drag_keeps_animation_state_and_separate_origins():
   with patch.object(hud, "_speed_limit_sign"), patch.object(rl, "draw_circle_gradient"), patch.object(rl, "draw_texture_pro") as wheel:
     hud.render(state)
     hud.render(state)
-    assert foreground_calls(fonts.draw)[-1].args[3:5] == (138, 69.5)
+    assert foreground_calls(fonts.draw)[-1].args[3:5] == (138, 62.5)
     rect = wheel.call_args.args[2]
     assert (rect.x, rect.y) == (115, 175)
     alpha = hud._set_speed_alpha.x

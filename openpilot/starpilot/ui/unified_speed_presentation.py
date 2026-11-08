@@ -1,4 +1,4 @@
-"""The selected set speed and latest received limit, shared by both layouts."""
+"""Set speed and source limit, retaining an accepted controller target through source gaps."""
 
 from dataclasses import dataclass
 import math
@@ -21,6 +21,8 @@ class UnifiedSpeedPresentation:
   slc_target_text: str | None = None
   posted_retained: bool = False
   limit_in_use: bool = False
+  set_limited: bool = False
+  show_last: bool = False
 
   @property
   def max_status(self) -> str:
@@ -79,10 +81,23 @@ def resolve_unified_speed(state, *, confirmation=False) -> UnifiedSpeedPresentat
     return str(round(value * factor)) if positive(value) else '–'
   posted = displayed_limit_mps(obs)
   target = displayed_adjusted_limit_mps(obs)
+  source = displayed_limit_source(obs)
+  active_target = obs.effective_cluster_target_mps
   pending = positive(obs.pending_speed_limit_mps)
-  slc_limiting = (state.longitudinal_active and not state.longitudinal_overridden and obs.action_enabled and
-                  obs.limiting_max_set and obs.source != 'unknown' and not obs.driver_override_active)
+  slc_enabled = (state.longitudinal_active and not state.longitudinal_overridden and obs.action_enabled and
+                 not obs.driver_override_active)
   posted_retained = positive(posted) and (str(obs.kind) != 'valid' or obs.status == 'display_hold')
+  show_last = posted_retained or obs.sign_recovering
+  # A live controller may keep its accepted target after the source stops reporting.
+  retained_target = bool(show_last and slc_enabled and not pending and obs.status != 'display_hold' and obs.session_id and
+                         obs.accepted_source not in ('', 'none', 'unknown') and positive(obs.effective_cap_mps) and
+                         positive(obs.accepted_speed_limit_mps) and positive(obs.accepted_adjusted_limit_mps) and
+                         positive(active_target) and math.isclose(active_target, obs.accepted_adjusted_limit_mps, abs_tol=.001))
+  if retained_target:
+    posted, target, source = obs.accepted_speed_limit_mps, active_target, obs.accepted_source
+    show_last = False
+  slc_enabled = slc_enabled and (obs.source != 'unknown' or retained_target)
+  slc_limiting = slc_enabled and obs.limiting_max_set
   if confirmation and pending:
     posted = obs.pending_speed_limit_mps
     posted_retained = False
@@ -102,7 +117,7 @@ def resolve_unified_speed(state, *, confirmation=False) -> UnifiedSpeedPresentat
       obs.action_enabled and obs.presentation_id and obs.presentation_id > 0):
     status = 'Confirm speed limit'
   elif (getattr(obs, 'status', '') == 'display_hold' or pending and obs.presentation_id == 0 or
-      retaining_limit(obs)):
+      retaining_limit(obs) and not retained_target):
     status = 'Unavailable'
   elif not obs.action_enabled:
     status = 'Display only'
@@ -117,20 +132,23 @@ def resolve_unified_speed(state, *, confirmation=False) -> UnifiedSpeedPresentat
   elif state.cruise_active:
     status = 'Using set speed'
   max_text = speed(state.cruise_kph / 3.6) if positive(state.cruise_kph) else '–'
-  source = displayed_limit_source(obs)
   if confirmation and pending and obs.pending_source not in ('', 'none'):
     source = obs.pending_source
   proposal = None
   if pending:
     proposal = obs.pending_adjusted_limit_mps or (
       target if obs.pending_speed_limit_mps == posted else obs.pending_speed_limit_mps + (obs.offset_mps or 0))
-  active_target = obs.effective_cluster_target_mps
   # A matching displayed number alone does not establish that this source is controlling.
-  limit_in_use = bool(slc_limiting and not pending and not posted_retained and not obs.sign_recovering and
-                      positive(posted) and positive(target) and positive(active_target) and
-                      positive(obs.accepted_speed_limit_mps) and source == obs.accepted_source and
-                      math.isclose(posted, obs.accepted_speed_limit_mps, abs_tol=.001) and
-                      math.isclose(target, active_target, abs_tol=.001))
+  accepted_display = bool(not pending and not show_last and
+                          positive(posted) and positive(target) and positive(active_target) and
+                          positive(obs.accepted_speed_limit_mps) and source == obs.accepted_source and
+                          math.isclose(posted, obs.accepted_speed_limit_mps, abs_tol=.001) and
+                          math.isclose(target, active_target, abs_tol=.001))
+  limit_in_use = slc_limiting and accepted_display
+  # Compare cluster values in displayed units; equal-looking speeds need no instruction.
+  set_limited = bool(slc_enabled and accepted_display and not obs.limiting_max_set and
+                     positive(obs.effective_cap_mps) and positive(state.cruise_kph) and
+                     round(active_target * factor) > round(state.cruise_kph / 3.6 * factor))
   return UnifiedSpeedPresentation(mode, max_text, speed(posted), offset, 'km/h' if state.metric else 'mph',
                                   source, pending,
                                   ('limit' if slc_limiting else 'max') if state.cruise_active else 'none',
@@ -141,4 +159,4 @@ def resolve_unified_speed(state, *, confirmation=False) -> UnifiedSpeedPresentat
                                   obs.override_basis != 'pedal' and
                                   positive(obs.effective_cluster_target_mps) else None,
                                   speed(active_target) if slc_limiting and positive(active_target) else None,
-                                  posted_retained, limit_in_use)
+                                  posted_retained, limit_in_use, set_limited, show_last)

@@ -46,7 +46,7 @@ def test_both_sign_styles_keep_their_height_with_or_without_offset(profile, offs
   else:
     historical_outline.assert_not_called()
     widget.shapes.outline.assert_called_once()
-    assert widget.shapes.outline.call_args.args[:2] == (bounds[0]+12+SIGN_WIDTH/2*scale, bounds[1]+12+SIGN_HEIGHT/2*scale)
+    assert widget.shapes.outline.call_args.args[:2] == (bounds[0]+12+SIGN_WIDTH/2*scale, bounds[1]+12+(SIGN_HEIGHT/2-7)*scale)
     assert widget.shapes.outline.call_args.kwargs == {}
   assert ('+5' in [call.args[0] for call in foreground_calls(widget.fonts.draw)]) == offset
 

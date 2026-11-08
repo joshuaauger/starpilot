@@ -89,7 +89,7 @@ def test_sign_keeps_distinct_slc_target_when_set_widget_is_hidden(profile, vienn
                                         effective_cluster_target_mps=45 / 3.6))
   font = fonts(profile)
   render_sign(SpeedLimitWidget(font, profile), current)
-  assert [call.args[0] for call in foreground_calls(font.draw)] == ['Limit', '45', 'OSM 50 +5']
+  assert [call.args[0] for call in foreground_calls(font.draw)] == ['LIMIT', '45', 'OSM 50 +5']
   drawing['outline'].assert_called_once()
   drawing['circle'].assert_not_called()
 
@@ -124,12 +124,66 @@ def test_set_and_binding_slc_stay_visible_beside_sign_or_prompt(profile, stage):
   assert 'SET' in texts and '35' in texts and not any(text.startswith('SLC ') for text in texts)
   assert ('LIMIT 30' in texts) == (stage == 'prompt')
   assert ('Now: LIMIT 30' in texts) == (stage == 'expanded')
-  assert ('Limit' in texts) == (stage in ('live', 'retained'))
+  assert ('LIMIT' in texts) == (stage in ('live', 'retained'))
   if pending:
     assert '25' in texts and not any(text.startswith('LAST') for text in texts)
     assert ('OSM' in texts) == (stage != 'expanded')
   else:
-    assert ('LAST DASH' if gap else 'DASH') in texts and '30' in texts
+    assert 'DASH' in texts and '30' in texts and not any(text.startswith('LAST') for text in texts)
+
+
+@pytest.mark.parametrize('gap', [False, True])
+def test_compact_set_stays_visible_while_the_accepted_limit_is_restricted(gap, drawing):
+  current = state(cruise_kph=45, drive_frame=1)
+  current = replace(current, speed_limit=replace(current.speed_limit, source='dashboard', speed_limit_mps=55 / 3.6,
+    accepted_source='dashboard', accepted_speed_limit_mps=55 / 3.6, accepted_adjusted_limit_mps=55 / 3.6,
+    presentation_adjusted_limit_mps=55 / 3.6, effective_cluster_target_mps=55 / 3.6, effective_cap_mps=55 / 3.6,
+    pending_speed_limit_mps=None, limiting_max_set=False))
+  if gap:
+    current = replace(current, speed_limit=replace(current.speed_limit, kind=ObservationKind.STALE,
+                                                  source='unknown', speed_limit_mps=None))
+  font = fonts(Profile.COMPACT)
+  hud = CompactHudRenderer(font, Mock())
+  for elapsed in range(0, 5_000_000_000, 100_000_000):
+    hud.render_max_speed(replace(current, observed_ns=current.observed_ns + elapsed))
+  assert foreground_calls(font.draw)[-1].args[-1].a >= 250
+  assert {call.args[0] for call in foreground_calls(font.draw)} == {'SET', '45'}
+  font.draw.reset_mock()
+  hud._speed_limit_sign(current)
+  assert [call.args[0] for call in foreground_calls(font.draw)] == ['LIMIT', '55', 'SET IS LOW', 'RAISE SET']
+
+
+@pytest.mark.parametrize('profile', list(Profile))
+@pytest.mark.parametrize('vienna', [False, True])
+@pytest.mark.parametrize('offset', [0, 5, 10])
+@pytest.mark.parametrize('selected', ['below', 'equal', 'above'])
+def test_accepted_sign_keeps_text_geometry_and_styling_through_source_gaps(profile, vienna, offset, selected, drawing):
+  current = state(cruise_kph={'below': 45, 'equal': 55 + offset, 'above': 70}[selected])
+  obs = replace(current.speed_limit, source='dashboard', speed_limit_mps=55 / 3.6,
+    accepted_source='dashboard', accepted_speed_limit_mps=55 / 3.6, accepted_adjusted_limit_mps=(55 + offset) / 3.6,
+    presentation_adjusted_limit_mps=(55 + offset) / 3.6, effective_cluster_target_mps=(55 + offset) / 3.6,
+    effective_cap_mps=(55 + offset) / 3.6, pending_speed_limit_mps=None, limiting_max_set=selected == 'above')
+  current = replace(current, appearance=replace(current.appearance, use_vienna_sign=vienna))
+  font = fonts(profile)
+  sign = SpeedLimitWidget(font, profile)
+  gap = replace(obs, kind=ObservationKind.STALE, source='unknown', speed_limit_mps=None,
+                last_received_source='vision', last_received_speed_limit_mps=99 / 3.6,
+                last_received_adjusted_limit_mps=109 / 3.6)
+  rendered = []
+  for observation in (obs, gap, replace(obs, sign_recovering=True)):
+    font.draw.reset_mock()
+    for shape in ('outline', 'circle'):
+      drawing[shape].reset_mock()
+    render_sign(sign, replace(current, speed_limit=observation))
+    text = [(*call.args[:-1], rgba_tuple(call.args[-1])) for call in foreground_calls(font.draw)]
+    shapes = [(shape, *call.args[:2], rgba_tuple(call.args[2]), call.kwargs)
+              for shape in ('outline', 'circle') for call in drawing[shape].call_args_list]
+    rendered.append((text, shapes))
+  assert rendered[0] == rendered[1] == rendered[2]
+  texts = [row[0] for row in rendered[0][0]]
+  assert not any(text.startswith('LAST') for text in texts)
+  assert ('SET IS LOW' in texts) == (selected == 'below')
+  assert ('RAISE SET' in texts) == (selected == 'below')
 
 
 @pytest.mark.parametrize('profile', list(Profile))
@@ -407,7 +461,7 @@ def test_compact_set_keeps_dinish_number_and_has_no_backplate(drawing):
   assert font_filename(Profile.COMPACT, FontRole.SET_SPEED) == 'DINish-Speed.fnt'
   number = foreground_calls(font.draw)[1].args
   top, bottom = font.vertical_ink(*number[:3])
-  assert number[4] + (top + bottom) / 2 == 84
+  assert number[4] + (top + bottom) / 2 == 77
   drawing['draw_circle_gradient'].assert_not_called()
 
 

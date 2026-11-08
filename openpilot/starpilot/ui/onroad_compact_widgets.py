@@ -137,7 +137,8 @@ class CompactHudRenderer:
   def render_max_speed(self, state: OnroadState) -> None:
     shown = resolve_unified_speed(state)
     status = set_speed_status(state, Profile.COMPACT, shown)
-    persistent = shown.slc_target_text is not None or shown.override_text is not None or speed_status(state, Profile.COMPACT, shown) is not None
+    persistent = (shown.set_limited or shown.slc_target_text is not None or shown.override_text is not None or
+                  speed_status(state, Profile.COMPACT, shown) is not None)
     set_speed_alpha = self._set_speed_opacity(state, (state.observed_ns or time.monotonic_ns()), slc_active=persistent)
     mx, my = widget_offset(state.customization, "compact", "max_speed")
     center = widget_size(state.customization, 'compact', 'max_speed')[0] / 2 + mx

@@ -14,7 +14,7 @@ import pytest
 
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory, font_filename, font_path, validate_bitmap_font
 from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
-from openpilot.starpilot.ui.large_speed_geometry import LARGE_SIGN_SCALE, SIGN_WIDTH, SIGN_HEIGHT, LIMIT_RECTS, confirmation_bounds
+from openpilot.starpilot.ui.large_speed_geometry import LARGE_SIGN_SCALE, SIGN_WIDTH, SIGN_HEIGHT, confirmation_bounds
 from openpilot.starpilot.ui.onroad_state import ObservationKind, slc_controls, speed_limit_bounds
 from openpilot.starpilot.ui.tests.test_speed_stack import road
 from openpilot.starpilot.system.starport.projection_layout import default_layout_for_viewport, validate_layout_for_viewport
@@ -100,8 +100,8 @@ def test_large_set_and_limit_share_typography_at_the_saved_position():
         assert abs(posted[3] + (left + right) / 2 - (418 + SIGN_WIDTH/2*LARGE_SIGN_SCALE)) <= .5
         a, b = fonts.vertical_ink('130', FontRole.SET_SPEED, posted[2])
         assert 60 <= b - a <= 70
-        assert abs(posted[4]+(a+b)/2-(95+68*LARGE_SIGN_SCALE)) <= .5
-        assert {'Limit', '120 +10'} <= {call[0] for call in calls}
+        assert abs(posted[4]+(a+b)/2-(95+61*LARGE_SIGN_SCALE)) <= .5
+        assert {'LIMIT', '120 +10'} <= {call[0] for call in calls}
         set_calls = [call for call in calls if call[1] == FontRole.SET_SPEED and call[3] < 388]
         assert bool(set_calls) == (show_set and value is not None)
         if set_calls:
@@ -113,14 +113,16 @@ def test_large_set_and_limit_share_typography_at_the_saved_position():
           top, bottom = fonts.vertical_ink(text, role, size)
           assert (role, size, y) == (posted[1], posted[2], posted[4])
           heading = next(call for call in calls if call[0] == 'SET')
-          limit = next(call for call in calls if call[0] == 'Limit')
-          assert (heading[1:3], heading[4]) == (limit[1:3], limit[4])
+          limit = next(call for call in calls if call[0] == 'LIMIT')
+          assert heading[1:3] == limit[1:3]
+          assert heading[4] + sum(fonts.vertical_ink(*heading[:3])) / 2 == pytest.approx(
+            limit[4] + sum(fonts.vertical_ink(*limit[:3])) / 2)
         assert not any('mph' in call[0] or 'km/h' in call[0] for call in calls)
         if show_set and value is None:
           start, end, stroke, color = lines.call_args.args
           assert (start.x, start.y, end.x, end.y, stroke) == pytest.approx(
-            (280 - 20 * LARGE_SIGN_SCALE, 95 + 68 * LARGE_SIGN_SCALE,
-             280 + 20 * LARGE_SIGN_SCALE, 95 + 68 * LARGE_SIGN_SCALE, 5 * LARGE_SIGN_SCALE))
+            (280 - 20 * LARGE_SIGN_SCALE, 95 + 61 * LARGE_SIGN_SCALE,
+             280 + 20 * LARGE_SIGN_SCALE, 95 + 61 * LARGE_SIGN_SCALE, 5 * LARGE_SIGN_SCALE))
           assert (color.r, color.g, color.b, color.a) == (255, 255, 255, 255)
           assert all(call[0] not in ('–', '?') for call in calls)
         else:
@@ -163,10 +165,14 @@ def test_set_and_slc_match_font_and_baseline_on_both_displays(pending):
                 sign = widget.sign if isinstance(widget, UnifiedSpeedWidget) else widget._speed_limit_widget
                 sign.render_confirmation(current)
             rows = {row[0]: row for row in calls if row[-1].a == 255}
-            for a, b in (('SET', 'OSM' if pending else 'Limit'), ('140', str(value))):
+            for a, b in (('SET', 'OSM' if pending else 'LIMIT'), ('140', str(value))):
               assert rows[a][1] == rows[b][1]
               assert rows[a][2] == pytest.approx(rows[b][2])
-              assert rows[a][4] == pytest.approx(rows[b][4])
+              if rows[a][1] == FontRole.SET_SPEED:
+                assert rows[a][4] == pytest.approx(rows[b][4])
+              else:
+                assert rows[a][4] + sum(fonts.vertical_ink(*rows[a][:3])) / 2 == pytest.approx(
+                  rows[b][4] + sum(fonts.vertical_ink(*rows[b][:3])) / 2)
             assert not any('mph' in text or 'km/h' in text for text in rows)
         finally:
           widget.close()
@@ -282,7 +288,7 @@ def test_sign_status_rows_keep_balanced_insets_with_real_fonts():
           with patch.object(fonts, 'draw', lambda *args, sink=calls: sink.append(args)):
             widget.render(current)
           if variant == 'retained':
-            assert [call[0] for call in calls if call[-1].a == 255] == ['Limit', '100', 'LAST VISION']
+            assert [call[0] for call in calls if call[-1].a == 255] == ['LIMIT', '100', 'LAST VISION']
           bounds = speed_limit_bounds(profile, current)
           assert bounds is not None
           x, y = bounds[0] + 12, bounds[1] + 12
@@ -296,11 +302,78 @@ def test_sign_status_rows_keep_balanced_insets_with_real_fonts():
             box = left+a, top+c, left+b, top+d
             # Keep real glyph ink clear of the portrait outline, including both footer rows.
             assert x+9.5*scale <= box[0] < box[2] <= x+118.5*scale, (profile, variant, text)
-            assert y+10.5*scale <= box[1] < box[3] <= y+133.5*scale, (profile, variant, text)
+            assert y+3.5*scale <= box[1] < box[3] <= y+126.5*scale, (profile, variant, text)
             assert (box[0]+box[2])/2 == pytest.approx(x+SIGN_WIDTH/2*scale, abs=.5)
             boxes.append(box)
           assert len(boxes) >= 2
           assert all(second[1] - first[3] >= 4*scale for first, second in zip(boxes, boxes[1:], strict=False))
+        widget.close()
+  finally:
+    if owns_context:
+      rl.close_window()
+
+
+def test_set_limited_sign_matches_approved_spacing_and_existing_touch_area():
+  from unittest.mock import patch
+  from openpilot.starpilot.ui.speed_limit_widget import SpeedLimitWidget, draw_set_speed, IN_USE
+  from openpilot.starpilot.ui.tests.test_unified_speed_native import state
+  from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_speed
+  owns_context = not rl.is_window_ready()
+  if owns_context:
+    rl.init_window(128, 128, 'SET-limited sign margins')
+  try:
+    for profile in Profile:
+      with BitmapFonts(profile, default_font_directory()) as fonts:
+        widget = SpeedLimitWidget(fonts, profile)
+        widget.shapes = Mock()
+        scale = widget.scale
+        for metric, limited, vienna in product((False, True), (False, True), (False, True)):
+          if vienna and not limited:
+            continue  # Regulatory Vienna geometry has its own existing checks.
+          factor = 3.6 if metric else 2.2369362921
+          target, selected = (120, 100 if limited else 130) if metric else (55, 45 if limited else 70)
+          current = state(metric=metric, cruise_kph=selected / factor * 3.6)
+          current = replace(current, appearance=replace(current.appearance, use_vienna_sign=vienna),
+            speed_limit=replace(current.speed_limit, source='dashboard', speed_limit_mps=target / factor,
+              accepted_source='dashboard', accepted_speed_limit_mps=target / factor,
+              accepted_adjusted_limit_mps=target / factor, presentation_adjusted_limit_mps=target / factor,
+              effective_cluster_target_mps=target / factor, effective_cap_mps=target / factor,
+              pending_speed_limit_mps=None, limiting_max_set=not limited))
+          shown = resolve_unified_speed(current)
+          bounds = speed_limit_bounds(profile, current)
+          assert bounds is not None
+          x, y = bounds[0] + 12, bounds[1] + 12
+          cx = x + SIGN_WIDTH / 2 * scale
+          outline_scale, cy = (13 / 12, 70) if limited else (1, 65)
+          calls = []
+          with patch.object(fonts, 'draw', lambda *args, sink=calls: sink.append(args)):
+            draw_set_speed(fonts, shown, cx - 200 * scale, y, rl.WHITE)
+            widget.render(current)
+          rows = [row for row in calls if row[-1].a == 255]
+          assert [row[0] for row in rows] == ['SET', str(selected), 'LIMIT', str(target), *(
+            ['SET IS LOW', 'RAISE SET'] if limited else ['DASH'])]
+          boxes = []
+          for text, role, size, left, top, _ in rows:
+            a, b = fonts.horizontal_ink(text, role, size)
+            c, d = fonts.vertical_ink(text, role, size)
+            boxes.append((left+a, top+c, left+b, top+d))
+          assert rows[1][1:3] == rows[3][1:3]
+          for first, second in ((0, 2), (1, 3)):
+            assert sum(boxes[first][1::2]) == pytest.approx(sum(boxes[second][1::2]), abs=.01)
+          half_width, half_height = (SIGN_WIDTH / 2 - 5) * outline_scale * scale, (SIGN_HEIGHT / 2 - 5) * outline_scale * scale
+          radius = 1.15 if profile == Profile.LARGE else 1.
+          for left, top, right, bottom in boxes[2:]:
+            assert (left+right)/2 == pytest.approx(cx, abs=.5)
+            assert min(left-(cx-half_width), cx+half_width-right,
+                       top-(y+cy*scale-half_height), y+cy*scale+half_height-bottom)-radius >= (8 if limited else 7.5)*scale
+          assert boxes[-2][3] + 5*scale <= boxes[-1][1]
+          assert abs((boxes[2][1]-(y+cy*scale-half_height)) - (y+cy*scale+half_height-boxes[-1][3])) <= scale
+          # The painted stroke plus its contour remains inside the existing tap target.
+          outer_width, outer_height = (SIGN_WIDTH/2-1)*outline_scale*scale, (SIGN_HEIGHT/2-1)*outline_scale*scale
+          assert bounds[0] <= cx-outer_width < cx+outer_width <= bounds[2]
+          assert bounds[1] <= y+cy*scale-outer_height < y+cy*scale+outer_height <= bounds[3]
+          accent = widget.shapes.outline.call_args.args[2]
+          assert (accent.r == IN_USE.r) == (not limited)
         widget.close()
   finally:
     if owns_context:
@@ -424,40 +497,45 @@ def test_native_signs_offsets_and_captions_fit_their_touch_targets():
       rl.close_window()
 
 
-def test_compact_preview_sprite_keeps_the_full_confirmation_and_override_sign():
+@pytest.mark.parametrize('profile', list(Profile))
+def test_preview_sprite_keeps_the_full_confirmation_override_and_set_limited_sign(profile):
   import json
   from unittest.mock import patch
   from openpilot.starpilot.ui.layout_preview_renderer import _Canvas, _straight_rgba, sample_state
   owns_context = not rl.is_window_ready()
   if owns_context:
     rl.init_window(128, 128, 'SLC preview crop fixture')
-  canvas = _Canvas(Profile.COMPACT)
+  canvas = _Canvas(profile)
+  owner = 'speed_limit' if profile == Profile.COMPACT else 'cruise_limits'
+  positions = (12, 16) if profile == Profile.COMPACT else (75, 95)
+  width, height = profile.size
   try:
-    for y, scene, vienna in product((12, 16), ('slc_notice', 'slc_pending', 'slc_retained', 'slc_display'), (False, True)):
+    for y, scene, vienna in product(positions, ('slc_notice', 'slc_pending', 'slc_retained', 'slc_display', 'slc_max'), (False, True)):
       document = default_document()
-      document['layouts']['compact']['speed_limit']['y'] = y
-      assert validate_document(document)['layouts']['compact']['speed_limit']['y'] == y
+      document['layouts'][profile][owner]['y'] = y
+      assert validate_document(document)['layouts'][profile][owner]['y'] == y
       state = sample_state(scene, document)
       state = replace(state, appearance=replace(state.appearance, use_vienna_sign=vienna))
-      with patch.dict('openpilot.starpilot.ui.layout_preview_renderer.RUNTIME_PREVIEW_WIDGETS', compact=('speed_limit',)):
-        png = canvas.render_widget_art(state, document['layouts']['compact'])
+      with patch.dict('openpilot.starpilot.ui.layout_preview_renderer.RUNTIME_PREVIEW_WIDGETS', {str(profile): (owner,)}):
+        png = canvas.render_widget_art(state, document['layouts'][profile])
       with Image.open(io.BytesIO(png)) as sheet:
-        slot = json.loads(sheet.info['starpilot-widget-art'])['sprites']['speed_limit']
+        slot = json.loads(sheet.info['starpilot-widget-art'])['sprites'][owner]
         sprite = sheet.crop((slot['x'], slot['y'], slot['x']+slot['width'], slot['y']+slot['height']))
-        rebuilt = Image.new('RGBA', Profile.COMPACT.size)
-        rebuilt.paste(sprite, (round(LIMIT_RECTS['compact'][0]+slot['offsetX']), round(y+slot['offsetY'])))
+        rebuilt = Image.new('RGBA', profile.size)
+        rebuilt.paste(sprite, (round(document['layouts'][profile][owner]['x']+slot['offsetX']), round(y+slot['offsetY'])))
       image = rl.load_image_from_texture(canvas.target.texture)
       try:
         rl.image_flip_vertical(image)
-        direct = np.frombuffer(_straight_rgba(bytes(image.data[:536*240*4])), np.uint8).reshape(240, 536, 4)
+        direct = np.frombuffer(_straight_rgba(bytes(image.data[:width*height*4])), np.uint8).reshape(height, width, 4)
       finally:
         rl.unload_image(image)
       assert np.array_equal(direct[..., 3], np.asarray(rebuilt)[..., 3])
-      if scene in ('slc_notice', 'slc_pending'):
-        assert (slot['offsetX'], slot['offsetY'], slot['width'], slot['height']) == (-172, -8, 328, 159)
-      else:
-        assert (slot['offsetX'], slot['offsetY'], slot['width'], slot['height']) == (-2, 0, SIGN_WIDTH+4, SIGN_HEIGHT)
-        assert np.any(direct[..., 3]), (y, scene)
+      if profile == Profile.COMPACT:
+        if scene in ('slc_notice', 'slc_pending'):
+          assert (slot['offsetX'], slot['offsetY'], slot['width'], slot['height']) == (-172, -8, 328, 159)
+        else:
+          assert (slot['offsetX'], slot['offsetY'], slot['width'], slot['height']) == (-12, -12, SIGN_WIDTH+24, SIGN_HEIGHT+20)
+      assert np.any(direct[..., 3]), (profile, y, scene)
   finally:
     canvas.close()
     if owns_context:

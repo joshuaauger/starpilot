@@ -23,6 +23,31 @@ from openpilot.starpilot.ui.tests.test_unified_speed_native import drawing as dr
 from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_speed
 
 
+@pytest.mark.parametrize('metric', [False, True])
+@pytest.mark.parametrize('offset', [0, 5])
+@pytest.mark.parametrize('cluster_delta', [0, 2])
+def test_set_limited_tracks_controller_target_without_changing_set(metric, offset, cluster_delta):
+  fixture = replay.RuntimeReplayTests()
+  fixture.setUp()
+  sm, cp = fixture.sm, fixture.cp
+  factor = 3.6 if metric else 2.2369362921
+  runtime = controller(offset / factor)
+  sm['slcDashboardObservation'].speedMps = 55 / factor
+  sm['carState'].vEgo = (40 - cluster_delta) / factor
+  sm['carState'].vEgoCluster = 40 / factor
+  for step, selected in enumerate((45, 55 + offset, 70, 45)):
+    sm['carState'].vCruise = (selected - cluster_delta) / factor * 3.6
+    sm['carState'].vCruiseCluster = selected / factor * 3.6
+    message = tick(runtime, sm, cp, step).message.slcState
+    current = OnroadState(True, False, 40 / factor, float(sm['carState'].vCruiseCluster),
+                          speed_limit_from_message(message), metric=metric, longitudinal_active=True)
+    shown = resolve_unified_speed(current)
+    assert shown.set_limited == (selected == 45)
+    assert shown.limit_text == str(55 + offset)
+    assert shown.max_text == str(selected)
+    assert sm['carState'].vCruise == pytest.approx((selected - cluster_delta) / factor * 3.6)
+
+
 @pytest.mark.parametrize('mode', [settings.PedalOverride.SPEED_REACHED, settings.PedalOverride.SET_SPEED])
 def test_controller_messages_keep_set_stable_through_pedal_release_stop_and_resume(mode):
   fixture = replay.RuntimeReplayTests()

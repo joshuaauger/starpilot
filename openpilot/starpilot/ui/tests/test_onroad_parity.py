@@ -219,7 +219,7 @@ def test_pending_confirmation_omits_redundant_speed_heading():
   with patch.object(rl, 'draw_line_ex'), patch.object(rl, 'draw_rectangle_rounded'), \
        patch.object(SpeedLimitShapes, 'button'):
     view._slc_actions(state)
-  assert [call.args[0] for call in foreground_calls(view.fonts.draw)] == ['New limit', 'Accept', '35', 'mph', 'Reject', 'new limit']
+  assert [call.args[0] for call in foreground_calls(view.fonts.draw)] == ['NEW LIMIT', 'ACCEPT', '35', 'REJECT', 'NEW LIMIT']
 
 
 def test_compact_pending_label_and_button_follow_saved_action_placement():
@@ -242,7 +242,7 @@ def test_compact_pending_label_and_button_follow_saved_action_placement():
   with patch.object(rl, 'draw_rectangle_rounded') as button, patch.object(rl, 'draw_line_ex'), \
        patch.object(SpeedLimitShapes, 'button'):
     view._slc_actions(state)
-  assert [call.args[0] for call in foreground_calls(view.fonts.draw) if call.args[0] in ('Accept', 'Reject')] == ['Accept', 'Reject']
+  assert [call.args[0] for call in foreground_calls(view.fonts.draw) if call.args[0] in ('ACCEPT', 'REJECT')] == ['ACCEPT', 'REJECT']
   button.assert_not_called()
   assert slc_controls(Profile.COMPACT, state)[0].bounds == (156., 48., 306., 160.)
 

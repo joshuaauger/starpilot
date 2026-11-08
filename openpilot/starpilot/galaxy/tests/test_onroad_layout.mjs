@@ -1220,15 +1220,17 @@ console.log('Display options, target switching and reload during polling passed'
   assert.equal(documentHelpers.overlapsReserved(profile, 'cruise_limits', 88, 500, sample.document.layouts.large), true)
 }
 
-// Portrait sizing and its attached chooser use the same compact bounds as native input.
+// Reserve the taller notice while keeping the opened buttons at their existing size.
 {
   const sample = snapshot(), profile = sample.metadata.profiles.compact
   profile.widgets.max_speed.width = 146
   profile.widgets.speed_limit = { ...profile.widgets.speed_limit, width: 128, height: 144,
-    confirmation: { x: -172, y: -8, width: 328, height: 152 } }
-  sample.document.version = 13
+    confirmation: { x: -172, y: -8, width: 328, height: 159 } }
+  sample.document.version = 14
   sample.document.layouts.compact.speed_limit = { x: 320, y: 16, enabled: true }
   assert.equal(documentHelpers.overlapsReserved(profile, 'speed_limit', 320, 16, sample.document.layouts.compact), false)
+  assert.equal(validDocument(sample.document, sample.metadata), true)
+  assert.equal(documentHelpers.overlapsReserved(profile, 'speed_limit', 320, 20, sample.document.layouts.compact), true)
   assert.equal(documentHelpers.overlapsReserved(profile, 'speed_limit', 320, 24, sample.document.layouts.compact), true)
   assert.equal(documentHelpers.overlapsReserved(profile, 'speed_limit', 317, 16, sample.document.layouts.compact), true)
   assert.equal(clampPlacement(profile, 'speed_limit', 330, 16, sample.document.layouts.compact).x, 320)

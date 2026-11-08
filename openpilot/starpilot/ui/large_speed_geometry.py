@@ -38,7 +38,7 @@ def confirmation_bounds(profile, x, y, *, opened=False):
   width = 2 * CONFIRMATION_PADDING + 2 * CONFIRMATION_BUTTON[profile] + CONFIRMATION_GAP if opened else 240
   left = x + 172 if profile == 'large' else x - 172 if opened else x - 100
   top = y - (12 if profile == 'large' else 8)
-  height = CONFIRMATION_HEIGHT[profile] if opened else 152
+  height = CONFIRMATION_HEIGHT[profile] if opened else (168 if profile == 'large' else 159)
   return left, top, left + width * scale, top + height * scale
 
 
@@ -52,6 +52,8 @@ def confirmation_buttons(profile, bounds):
 
 def confirmation_footprint(profile):
   left, top, right, bottom = confirmation_bounds(profile, 0, 0, opened=True)
+  # The notice is taller than the open buttons on Compact.
+  bottom = max(bottom, confirmation_bounds(profile, 0, 0)[3])
   return {'x': left, 'y': top, 'width': right - left, 'height': bottom - top}
 
 

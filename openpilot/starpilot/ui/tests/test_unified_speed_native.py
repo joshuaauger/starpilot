@@ -123,7 +123,7 @@ def test_set_and_binding_slc_stay_visible_beside_sign_or_prompt(profile, stage):
   texts = [call.args[0] for call in foreground_calls(font.draw)]
   assert 'SET' in texts and '35' in texts and not any(text.startswith('SLC ') for text in texts)
   assert ('LIMIT 30' in texts) == (stage == 'prompt')
-  assert ('Now: LIMIT 30 mph' in texts) == (stage == 'expanded')
+  assert ('Now: LIMIT 30' in texts) == (stage == 'expanded')
   assert ('Limit' in texts) == (stage in ('live', 'retained'))
   if pending:
     assert '25' in texts and not any(text.startswith('LAST') for text in texts)
@@ -181,7 +181,7 @@ def test_sign_heading_identifies_the_displayed_source(profile, pending, vienna, 
   font = fonts(profile)
   render_sign(SpeedLimitWidget(font, profile), current)
   expected = [heading, '50']
-  assert [call.args[0] for call in foreground_calls(font.draw)] == expected + (['+5'] if offset else []) + (['New Limit', 'Tap to review'] if pending else [])
+  assert [call.args[0] for call in foreground_calls(font.draw)] == expected + (['+5'] if offset else []) + (['NEW LIMIT', 'Tap to review'] if pending else [])
   if not pending:
     label, speed = foreground_calls(font.draw)[:2]
     assert rgba_tuple(label.args[-1]) == rgba_tuple(speed.args[-1])
@@ -217,10 +217,10 @@ def test_pending_notice_pulses_without_changing_ink_and_arrow_follows_speed(prof
   assert drawing['arrow'].call_args.args[3] == -1
   render_sign(sign, replace(current, observed_ns=10_350_000_000, speed_mps=60 / 3.6))
   after = {call.args[0]: call.args for call in foreground_calls(font.draw)}
-  assert set(before) == {'OSM', '50', '+5', 'New Limit', 'Tap to review'}
+  assert set(before) == {'OSM', '50', '+5', 'NEW LIMIT', 'Tap to review'}
   assert all(after[text][3:5] == args[3:5] for text, args in before.items())
-  assert all(rgba_tuple(after[text][-1]) == rgba_tuple(args[-1]) for text, args in before.items() if text != 'New Limit')
-  assert rgba_tuple(after['New Limit'][-1]) != rgba_tuple(before['New Limit'][-1])
+  assert all(rgba_tuple(after[text][-1]) == rgba_tuple(args[-1]) for text, args in before.items() if text != 'NEW LIMIT')
+  assert rgba_tuple(after['NEW LIMIT'][-1]) != rgba_tuple(before['NEW LIMIT'][-1])
   drawing['circle'].assert_not_called()
   drawing['outline'].assert_not_called()
   assert drawing['arrow'].call_args.args[3] == 1
@@ -248,12 +248,17 @@ def test_wheel_cues_follow_confirmation_availability(profile, available, drawing
   sign.render_confirmation(current)
   drawing['draw_rectangle_rounded_lines_ex'].assert_not_called()
   drawing['button'].assert_not_called()
+  texts = [call.args[0] for call in foreground_calls(sign.fonts.draw)]
+  assert 'NEW LIMIT' in texts
+  assert ('ACCEPT' in texts) == available
+  assert ('REJECT' in texts) == available
   calls = drawing['wheel_key'].call_args_list
   assert [call.args[0] for call in calls] == ([True, False] if available else [])
   if available:
     bounds = speed_limit_bounds(profile, current)
     assert bounds is not None
-    assert all(call.args[2] == pytest.approx(bounds[1] + 135.5 * CONFIRMATION_SCALE[profile]) for call in calls)
+    hint_y = bounds[1] + (12 if profile == Profile.LARGE else 8) + (142 if profile == Profile.LARGE else 136.75) * CONFIRMATION_SCALE[profile]
+    assert all(call.args[2] == pytest.approx(hint_y) for call in calls)
     assert bounds[0] < calls[0].args[1] < calls[1].args[1] < bounds[2]
 
 
@@ -398,9 +403,11 @@ def test_compact_set_keeps_dinish_number_and_has_no_backplate(drawing):
   hud.render_max_speed(current)
   hud.render_max_speed(replace(current, observed_ns=current.observed_ns + 20_000_000))
   assert [(call.args[0], call.args[1]) for call in foreground_calls(font.draw)] == [
-    ('SET', FontRole.MEDIUM), ('km/h', FontRole.NORMAL), ('80', FontRole.SET_SPEED)]
+    ('SET', FontRole.SEMI_BOLD), ('80', FontRole.SET_SPEED)]
   assert font_filename(Profile.COMPACT, FontRole.SET_SPEED) == 'DINish-Speed.fnt'
-  assert foreground_calls(font.draw)[2].args[4] == 46
+  number = foreground_calls(font.draw)[1].args
+  top, bottom = font.vertical_ink(*number[:3])
+  assert number[4] + (top + bottom) / 2 == 84
   drawing['draw_circle_gradient'].assert_not_called()
 
 
@@ -416,16 +423,20 @@ def test_compact_unset_max_stays_hidden(metric, engaged, drawing):
   drawing['draw_circle_gradient'].assert_not_called()
 
 
-def test_large_limit_keeps_a_unit_when_set_speed_is_hidden():
-  profile = Profile.LARGE
-  current = state()
-  current = replace(current, speed_limit=replace(current.speed_limit, pending_speed_limit_mps=None))
+@pytest.mark.parametrize('profile', list(Profile))
+@pytest.mark.parametrize('metric', [False, True])
+def test_limit_has_no_unit_when_set_speed_is_hidden(profile, metric):
+  current = state(metric=metric)
   current = replace(current, speed_limit=replace(current.speed_limit, pending_speed_limit_mps=None))
   current.customization['showMaxSpeed'] = False
   current.customization['layouts']['compact']['max_speed']['enabled'] = False
   font = fonts(profile)
-  UnifiedSpeedWidget(font).render(rl.Rectangle(30, 30, 1800, 1020), current)
-  assert [call.args[0] for call in foreground_calls(font.draw)].count('km/h') == 1
+  if profile == Profile.LARGE:
+    UnifiedSpeedWidget(font).render(rl.Rectangle(30, 30, 1800, 1020), current)
+  else:
+    CompactHudRenderer(font, Mock()).render(current)
+  texts = [call.args[0] for call in foreground_calls(font.draw)]
+  assert texts and not any('mph' in text or 'km/h' in text for text in texts)
 
 
 @pytest.mark.parametrize('profile', list(Profile))
@@ -436,26 +447,26 @@ def test_transparent_chooser_keeps_touch_targets_and_pressed_feedback(profile, p
   controls = slc_controls(profile, current)
   view._slc_actions(current)
   rows = [call.args for call in foreground_calls(view.fonts.draw)]
-  assert [row[0] for row in rows] == ['New limit', 'Accept', '55', 'km/h', 'Reject', 'new limit']
+  assert [row[0] for row in rows] == ['NEW LIMIT', 'ACCEPT', '55', 'REJECT', 'NEW LIMIT']
   drawing['draw_rectangle_rounded'].assert_not_called()
   drawing['draw_line_ex'].assert_not_called()
   drawing['draw_rectangle_rounded_lines_ex'].assert_not_called()
   outlines = drawing['button'].call_args_list
   assert [rgba_tuple(call.args[-1]) for call in outlines] == [rgba_tuple(IN_USE), rgba_tuple(REJECT)]
-  for control, content in zip(controls, (rows[1:4], rows[4:]), strict=True):
+  for control, content in zip(controls, (rows[1:3], rows[3:]), strict=True):
     for row in content:
       left, top, right, bottom = control.bounds
       a, b = view.fonts.horizontal_ink(*row[:3])
       c, d = view.fonts.vertical_ink(*row[:3])
       assert left < row[3] + a < row[3] + b < right
       assert top < row[4] + c < row[4] + d < bottom
-  original = [rgba_tuple(row[-1]) for row in rows if row[0] in ('Accept', 'Reject')]
+  original = [rgba_tuple(row[-1]) for row in rows if row[0] in ('ACCEPT', 'REJECT')]
   view.pressed_action = lambda: controls[pressed_index].request
   view.fonts.draw.reset_mock()
   drawing['button'].reset_mock()
   view._slc_actions(current)
   assert [call.args[:5] for call in foreground_calls(view.fonts.draw)] == [row[:5] for row in rows]
-  pressed = [rgba_tuple(call.args[-1]) for call in foreground_calls(view.fonts.draw) if call.args[0] in ('Accept', 'Reject')]
+  pressed = [rgba_tuple(call.args[-1]) for call in foreground_calls(view.fonts.draw) if call.args[0] in ('ACCEPT', 'REJECT')]
   assert pressed[pressed_index] != original[pressed_index] and pressed[1-pressed_index] == original[1-pressed_index]
   pressed_outlines = drawing['button'].call_args_list
   assert [call.kwargs['pressed'] for call in pressed_outlines] == [pressed_index == 0, pressed_index == 1]

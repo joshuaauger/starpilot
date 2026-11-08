@@ -50,7 +50,8 @@ def test_closed_and_open_card_share_anchor_and_physically_scaled_targets(profile
   opened = touch.present(current)
   after = speed_limit_bounds(profile, opened)
   assert before is not None and after is not None
-  assert before[1] == after[1] and before[3] <= after[3]
+  assert before[1] == after[1]
+  assert before[3] - after[3] == pytest.approx(7 if profile == Profile.COMPACT else 0)
   assert after[0] <= before[0] < before[2] <= after[2]
   first, last = slc_controls(profile, opened)
   scale = CONFIRMATION_SCALE[profile]
@@ -60,10 +61,27 @@ def test_closed_and_open_card_share_anchor_and_physically_scaled_targets(profile
   assert (first.bounds[0] - after[0]) / scale == pytest.approx(8)
   assert (after[2] - last.bounds[2]) / scale == pytest.approx(8)
   torque = current.customization['layouts'][str(profile)]['torque_bar']
-  assert after[3] < torque['y']
+  assert max(before[3], after[3]) <= torque['y']
   if profile == Profile.COMPACT:
     assert after == (148., 8, 476., 160.)
     assert after[0] > 146
+
+
+@pytest.mark.parametrize('profile', list(Profile))
+@pytest.mark.parametrize('wheel_confirmation', [False, True])
+def test_notice_footer_opens_choices_without_accepting_or_rejecting(profile, wheel_confirmation):
+  current = replace(state(), slc_wheel_confirmation_available=wheel_confirmation)
+  emitted = []
+  touch = OnroadInput(emitted.append, profile)
+  bounds = speed_limit_bounds(profile, current)
+  assert bounds is not None
+  left, _, right, bottom = bounds
+  x, y = (left + right) / 2, bottom - 2 * CONFIRMATION_SCALE[profile]
+  touch.press(x, y, current)
+  touch.release(x, y, current)
+  assert touch.present(current).slc_prompt_open
+  assert len(slc_controls(profile, touch.present(current))) == 2
+  assert not emitted
 
 
 @pytest.mark.parametrize('profile', list(Profile))
@@ -136,7 +154,7 @@ def test_new_layouts_reject_torque_overlap_and_legacy_migration_is_targeted(prof
   original = deepcopy(doc)
   migrated = validate_document(doc)
   assert doc == original
-  assert migrated['version'] == 13
+  assert migrated['version'] == 14
   assert migrated['palette'] == doc['palette']
   assert migrated['layouts']['large']['current_speed'] == doc['layouts']['large']['current_speed']
   assert migrated['layouts'][str(profile)][owner]['y'] == default_document()['layouts'][str(profile)][owner]['y']

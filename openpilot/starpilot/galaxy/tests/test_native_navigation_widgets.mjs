@@ -10,11 +10,11 @@ print(json.dumps(dict(document=default_document(), defaults=default_document(), 
                      revision="native", editable=True, valid=True, activeProfile="large", supportedProfiles=["large"])))
 `], { encoding: "utf8" }))
 assert.equal(validSnapshot(data), true)
-for (const version of [11, 12, 13]) {
+for (const version of [11, 12, 13, 14]) {
   assert.equal(validSnapshot({ ...data, document: { ...data.document, version } }), true)
   assert.equal(validSnapshot({ ...data, defaults: { ...data.defaults, version } }), true)
 }
-for (const version of [9, 10, 14]) {
+for (const version of [9, 10, 15]) {
   assert.equal(validSnapshot({ ...data, document: { ...data.document, version } }), false)
   assert.equal(validSnapshot({ ...data, defaults: { ...data.defaults, version } }), false)
 }

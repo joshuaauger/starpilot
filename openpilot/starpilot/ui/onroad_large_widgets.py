@@ -11,12 +11,12 @@ import json
 from openpilot.starpilot.ui.raylib import rl
 
 from openpilot.starpilot.ui.onroad_customization import offset, rgba, widget_size
-from openpilot.starpilot.ui.onroad_state import OnroadState, manual_slc_confirmation, speed_limit_bounds, slc_action_occludes
+from openpilot.starpilot.ui.onroad_state import OnroadState, manual_slc_confirmation, slc_action_occludes
 from openpilot.starpilot.ui.onroad_widget_style import draw_control_card
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.wheel_feedback import WheelFeedbackFade
 from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_speed
-from openpilot.starpilot.ui.speed_limit_widget import MUTED, SpeedLimitWidget, draw_caption, draw_ink, draw_line, draw_text, set_speed_status
+from openpilot.starpilot.ui.speed_limit_widget import SpeedLimitWidget, draw_set_speed, draw_set_status, draw_text, set_speed_status
 
 
 ENGAGED = rl.Color(128, 216, 166, 255)
@@ -65,7 +65,7 @@ class UnifiedSpeedWidget:
         draw_text(self.fonts, text, role, font_size, box.x + (box.width - width) / 2, y, color)
 
   def render(self, content: rl.Rectangle, state: OnroadState) -> None:
-    from openpilot.starpilot.ui.large_speed_geometry import GAP, WIDTH, PADDING, SOURCE_ROW_HEIGHT, SOURCE_TOP, card_height
+    from openpilot.starpilot.ui.large_speed_geometry import GAP, WIDTH, SOURCE_ROW_HEIGHT, SOURCE_TOP, card_height
     from openpilot.starpilot.ui.onroad_customization import placement
     shown = resolve_unified_speed(state)
     if shown.mode == 'hidden':
@@ -79,31 +79,10 @@ class UnifiedSpeedWidget:
     border = rl.Color(*rgba(state.customization, 'cardBorder', 'large', 'cruise_limits'))
     text = rl.Color(*rgba(state.customization, 'text', 'large', 'cruise_limits'))
     if shown.mode != 'limit_only':
-      confirming = manual_slc_confirmation(Profile.LARGE, state)
-      center = rect.x + 120
-      x = rect.x + PADDING if confirming else center
-      draw_caption(self.fonts, 'SET', x, rect.y + 12, unit=shown.unit, centered=not confirming)
-      if shown.max_text == '–':
-        draw_line(Profile.LARGE, rl.Vector2(center - 28, rect.y + 90), rl.Vector2(center + 28, rect.y + 90), 8, MUTED)
-      else:
-        size = 100
-        size *= min(1, (148 if confirming else 200) / max(1, self.fonts.measure(shown.max_text, FontRole.SET_SPEED, size).width))
-        left, right = self.fonts.horizontal_ink(shown.max_text, FontRole.SET_SPEED, size)
-        top, bottom = self.fonts.vertical_ink(shown.max_text, FontRole.SET_SPEED, size)
-        number_x = x + self.fonts.horizontal_ink('SET', FontRole.MEDIUM, 34)[0] - left if confirming else center - (left + right) / 2
-        draw_ink(self.fonts, shown.max_text, FontRole.SET_SPEED, size, number_x, rect.y + 90 - (bottom - top) / 2, text)
-    if shown.mode != 'limit_only' and (label := set_speed_status(state, Profile.LARGE, shown)):
-      confirming = manual_slc_confirmation(Profile.LARGE, state)
-      size = 24
-      left, right = self.fonts.horizontal_ink(label, FontRole.SEMI_BOLD, size)
-      size *= min(1, (148 if confirming else 200) / max(1, right - left))
-      left, right = self.fonts.horizontal_ink(label, FontRole.SEMI_BOLD, size)
-      x = rect.x + (PADDING + self.fonts.horizontal_ink('SET', FontRole.MEDIUM, 34)[0] - left if confirming else 120 - (left + right) / 2)
-      draw_ink(self.fonts, label, FontRole.SEMI_BOLD, size, x, rect.y + 136, text)
+      draw_set_speed(self.fonts, shown, rect.x + 92, rect.y, text)
+      if label := set_speed_status(state, Profile.LARGE, shown):
+        draw_set_status(self.fonts, label, rect.x + 92, rect.y, text)
     self.sign.render(state, defer_confirmation=True)
-    if (shown.mode == 'limit_only' and not manual_slc_confirmation(Profile.LARGE, state) and
-        (bounds := speed_limit_bounds(Profile.LARGE, state)) is not None):
-      draw_ink(self.fonts, shown.unit, FontRole.NORMAL, 24, bounds[2], bounds[3] - 32)
     if sources:
       row = rl.Rectangle(rect.x, rect.y + max(height, SOURCE_TOP) + (GAP if separate else 0), WIDTH, SOURCE_ROW_HEIGHT)
       if separate:

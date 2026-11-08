@@ -9,7 +9,7 @@ from typing import Any, NotRequired, TypedDict
 
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
-from openpilot.starpilot.ui.large_speed_geometry import LIMIT_RECTS, confirmation_bounds, confirmation_footprint
+from openpilot.starpilot.ui.large_speed_geometry import LIMIT_RECTS, confirmation_footprint
 from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
 from openpilot.starpilot.ui.onroad_favorites_geometry import shelf_metadata
 from openpilot.starpilot.ui.large_speed_geometry import (WIDTH, CARD_HEIGHT, ACTION_WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y,
@@ -342,7 +342,7 @@ def customization_metadata():
 
 
 def default_document():
-  return {"version": 13, "clock24Hour": False, "reduceMotion": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
+  return {"version": 14, "clock24Hour": False, "reduceMotion": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
           "widgetColors": {profile: {} for profile in PROFILES}, "layouts": {
     profile: {key: {**widget["default"], **({"size": WIDGET_SIZES[key][profile][1]} if key in WIDGET_SIZES else {})}
               for key, widget in data["widgets"].items()}
@@ -431,7 +431,9 @@ def confirmation_layout_valid(layout, profile, widgets, bounds, *, extra_height=
   at = layout[owner]
   if not at['enabled'] or not layout['speed_limit_actions']['enabled']:
     return True
-  left, top, right, bottom = confirmation_bounds(profile, at['x'], at['y'], opened=True)
+  area = confirmation_footprint(profile)
+  left, top = at['x'] + area['x'], at['y'] + area['y']
+  right, bottom = left + area['width'], top + area['height']
   if extra_height:
     left, right = min(left, at['x']), max(right, at['x'] + widgets[owner]['width'])
     bottom = max(bottom, at['y'] + widgets[owner]['height'] + extra_height)
@@ -473,7 +475,7 @@ def migrate_confirmation_layout(layout, profile, widgets, bounds, *, extra_heigh
 
 
 def validate_document(value):
-  if type(value) is not dict or type(value.get("version")) is not int or value["version"] not in range(1, 14):
+  if type(value) is not dict or type(value.get("version")) is not int or value["version"] not in range(1, 15):
     raise ValueError("Invalid customization version")
   fields = {"version", "palette", "layouts"} | ({"widgetColors"} if value["version"] >= 2 else set())
   if value["version"] >= 3:
@@ -745,6 +747,7 @@ def validate_document(value):
         old_gap += GAP if result.get('speedSourcesCard') is True else 0
         if actions['x'] == card['x'] + ACTION_X - 88 and actions['y'] == card['y'] + old_gap:
           actions['y'] = card['y'] + ACTION_Y - 75
+    if value['version'] < 14:
       migrate_confirmation_layout(result['layouts'][profile], profile, data['widgets'], data['bounds'],
                                   extra_height=sources_extent(result) if profile == 'large' else 0)
     elif not confirmation_layout_valid(result['layouts'][profile], profile, data['widgets'], data['bounds'],

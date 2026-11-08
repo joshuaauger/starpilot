@@ -63,7 +63,7 @@ def test_hidden_set_keeps_control_context_inside_moved_confirmation(profile, mod
   document = default_document()
   document['showMaxSpeed'] = False
   document['layouts']['compact']['max_speed']['enabled'] = False
-  document['layouts']['compact']['speed_limit'].update(x=200, y=20)
+  document['layouts']['compact']['speed_limit'].update(x=200, y=16)
   document = validate_document(document)
   current = state(customization=document, slc_prompt_open=True)
   current = replace(current, longitudinal_overridden=mode == 'pedal', speed_limit=replace(current.speed_limit,
@@ -79,8 +79,8 @@ def test_hidden_set_keeps_control_context_inside_moved_confirmation(profile, mod
   assert not foreground_calls(font.draw)
   SpeedLimitWidget(font, profile).render_confirmation(current)
   rows = [call.args for call in foreground_calls(font.draw)]
-  expected = {'limit': 'Now: LIMIT 128 km/h', 'override': 'Now: OVERRIDE 128 km/h', 'pedal': 'Now: PEDAL'}[mode]
-  assert [row[0] for row in rows] == [expected, 'Accept', '120', 'km/h', 'Reject', 'new limit']
+  expected = {'limit': 'Now: LIMIT 128', 'override': 'Now: OVERRIDE 128', 'pedal': 'Now: PEDAL'}[mode]
+  assert [row[0] for row in rows] == [expected, 'ACCEPT', '120', 'REJECT', 'NEW LIMIT']
   status, accept = rows[:2]
   assert status[4] + font.vertical_ink(*status[:3])[1] < accept[4]
   assert not monitor_visible(Profile.COMPACT, current, fresh=True, onroad=True, top_icons=False)
@@ -110,7 +110,7 @@ def test_displayed_proposal_matches_the_decision_during_a_held_override(profile,
                         metric=True, longitudinal_active=True, slc_prompt_open=True)
   font = fonts(profile)
   SpeedLimitWidget(font, profile).render_confirmation(current)
-  assert [call.args[0] for call in foreground_calls(font.draw)] == ['Now: OVERRIDE 128 km/h', 'Accept', '120', 'km/h', 'Reject', 'new limit']
+  assert [call.args[0] for call in foreground_calls(font.draw)] == ['Now: OVERRIDE 128', 'ACCEPT', '120', 'REJECT', 'NEW LIMIT']
   assert resolve_unified_speed(current).override_text == '128'
   action = Action(runtime.session_id, 1, pending.decisionId, pending.presentationId, choice)
   result = tick(runtime, sm, cp, 4, request=action).message.slcState
@@ -142,7 +142,7 @@ def test_hidden_set_prompt_suppresses_only_overlapping_optional_text(widget, met
   monkeypatch.setattr('openpilot.starpilot.ui.onroad_weather.draw_weather_icon', Mock())
   document = default_document()
   document['layouts']['compact']['max_speed']['enabled'] = False
-  document['layouts']['compact']['speed_limit'].update(x=200, y=20)
+  document['layouts']['compact']['speed_limit'].update(x=200, y=16)
   document['layouts']['compact'][widget].update(enabled=True, x=330 if widget == 'weather' else 200, y=0)
   current = state(customization=validate_document(document), slc_prompt_open=True)
   view = OnroadView.__new__(OnroadView)

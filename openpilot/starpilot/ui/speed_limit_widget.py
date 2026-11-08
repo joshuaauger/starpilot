@@ -21,6 +21,8 @@ IN_USE = rl.Color(128, 216, 166, 255)
 OVERRIDE = rl.Color(214, 188, 240, 255)
 REJECT = rl.Color(242, 139, 139, 255)
 SOURCE_LABELS = {'dashboard': 'DASH', 'map': 'OSM', 'vision': 'VISION', 'mapbox': 'NAV'}
+NUMBER_SIZE, HEADING_SIZE = 70, 26
+HEADING_ROW, NUMBER_ROW, SOURCE_ROW = 25, 68, 120
 
 
 def draw_text(fonts, text, role, size, x, y, color=INK):
@@ -45,24 +47,32 @@ def draw_ink(fonts, text, role, size, x, top, color=INK):
   return fonts.measure(text, role, size).width, ink_bottom - ink_top
 
 
-def draw_caption(fonts, label, x, top, color=MUTED, *, unit=None, size=None, centered=False):
-  large = fonts.profile == Profile.LARGE
-  label_size = size or (34 if large else 24)
-  unit_size, gap = ((32 if centered else 28), 12) if large else (20, 8)
-  if centered:
-    width = fonts.measure(label, FontRole.MEDIUM, label_size).width
-    if unit:
-      width += gap + fonts.measure(unit, FontRole.NORMAL, unit_size).width
-    x -= width / 2
-  width, height = draw_ink(fonts, label, FontRole.MEDIUM, label_size, x, top, color)
-  if unit:
-    unit_top, _ = fonts.vertical_ink(unit, FontRole.NORMAL, unit_size)
-    # Exclude the p descender when aligning mph to the caption baseline.
-    _, baseline = fonts.vertical_ink('mh' if unit == 'mph' else unit, FontRole.NORMAL, unit_size)
-    unit_width, _ = draw_ink(fonts, unit, FontRole.NORMAL, unit_size, x + width + gap,
-                             top + height - (baseline - unit_top), color)
-    width += gap + unit_width
-  return width, height
+def draw_speed_row(fonts, text, role, size, center, row, color, reference):
+  # Shared glyph references keep SET and SLC on the same baseline as values change.
+  left, right = fonts.horizontal_ink(text, role, size)
+  top, bottom = fonts.vertical_ink(reference, role, size)
+  draw_text(fonts, text, role, size, center - (left + right) / 2, row - (top + bottom) / 2, color)
+
+
+def draw_set_speed(fonts, shown, center, top, color):
+  scale = LARGE_SIGN_SCALE if fonts.profile == Profile.LARGE else 1.
+  text_scale = scale * Profile.COMPACT.font_scale / fonts.profile.font_scale
+  draw_speed_row(fonts, 'SET', FontRole.SEMI_BOLD, HEADING_SIZE * text_scale, center,
+                 top + HEADING_ROW * scale, color, 'H')
+  if shown.max_text == '–':
+    draw_line(fonts.profile, rl.Vector2(center - 20 * scale, top + NUMBER_ROW * scale),
+              rl.Vector2(center + 20 * scale, top + NUMBER_ROW * scale), 5 * scale, color)
+  else:
+    draw_speed_row(fonts, shown.max_text, FontRole.SET_SPEED, NUMBER_SIZE * text_scale, center,
+                   top + NUMBER_ROW * scale, color, '0123456789')
+
+
+def draw_set_status(fonts, label, center, top, color):
+  scale = LARGE_SIGN_SCALE if fonts.profile == Profile.LARGE else 1.
+  size = 22 * scale * Profile.COMPACT.font_scale / fonts.profile.font_scale
+  left, right = fonts.horizontal_ink(label, FontRole.MEDIUM, size)
+  size *= min(1, 108 * scale / max(1, right - left))
+  draw_speed_row(fonts, label, FontRole.MEDIUM, size, center, top + SOURCE_ROW * scale, color, label)
 
 
 def speed_status(state, profile, shown):
@@ -155,11 +165,14 @@ class SpeedLimitWidget:
                 y + cy * scale - (top + bottom) / 2, color)
 
     if state.slc_prompt_open:
-      context = (f'Now: {current_status}' + (f' {shown.unit}' if current_status != 'PEDAL' else '')
-                 if current_status else 'New limit')
+      context = f'Now: {current_status}' if current_status else 'NEW LIMIT'
       context_size = 26 if self.profile == Profile.LARGE else 24
       context_size *= min(1, (width - 24) / max(1, ink_width(context, context_size)))
       text(context, context_size, width / 2, 24, secondary)
+      label_size, number_size, detail_size, gap = (30, 58, 26, 8) if self.profile == Profile.LARGE else (26, 50, 24, 6)
+      # Reserve the full label height so capitalization does not shift either row.
+      heading_height = max(ink_height(label, label_size, FontRole.SEMI_BOLD) for label in ('Accept', 'Reject'))
+      number_height = ink_height(shown.proposal_text, number_size, FontRole.SET_SPEED)
       for control in slc_controls(self.profile, state):
         accent = (IN_USE if control.label == 'Accept' else REJECT) if control.enabled else MUTED
         selected = control.enabled and pressed == control.request
@@ -169,70 +182,66 @@ class SpeedLimitWidget:
         w, h = (control.bounds[2] - control.bounds[0]) / scale, (control.bounds[3] - control.bounds[1]) / scale
         self.shapes.button(x + (left + w / 2) * scale, y + (top + h / 2) * scale, accent,
                            profile=self.profile, scale=scale, pressed=selected)
-        uw = ink_width(shown.unit, 20)
-        size = 60 if self.profile == Profile.LARGE else 52
-        padding, gap = (28, 6) if self.profile == Profile.LARGE else (24, 4)
-        size *= min(1, (w - padding - gap - uw) / max(1, ink_width(shown.proposal_text, size, FontRole.BOLD)))
-        nh, uh = ink_height(shown.proposal_text, size, FontRole.BOLD), ink_height(shown.unit, 20)
-        caption_height = ink_height('new limit', 22)
-        row_height = max(nh, uh, caption_height)
-        # Center each visible text group while keeping both action headings on one row.
-        label_y = top + (h - 8 - row_height) / 2
-        detail_bottom = label_y + ink_height(control.label, 37) / 2 + 8 + row_height
-        text(control.label, 37, left + w / 2, label_y, ink)
+        start = top + (h - heading_height - gap - number_height) / 2
+        text(control.label.upper(), label_size, left + w / 2, start + heading_height / 2, ink, FontRole.SEMI_BOLD)
+        detail_y = start + heading_height + gap + number_height / 2
         if control.label == 'Accept':
           # Bind the adjusted proposal to its action, not to the current override or source reading.
-          nw = ink_width(shown.proposal_text, size, FontRole.BOLD)
-          start = left + (w - nw - gap - uw) / 2
-          text(shown.proposal_text, size, start + nw / 2, detail_bottom - nh / 2, ink, FontRole.BOLD)
-          text(shown.unit, 20, start + nw + gap + uw / 2, detail_bottom - uh / 2, ink)
+          text(shown.proposal_text, number_size, left + w / 2, detail_y, ink, FontRole.SET_SPEED)
         else:
-          text('new limit', 22, left + w / 2, detail_bottom - caption_height / 2, ink)
+          text('NEW LIMIT', detail_size, left + w / 2, detail_y, ink)
       return
 
+    content_top = y + (12 if self.profile == Profile.LARGE else 8)
+    row_origin = (content_top - y) / scale
+    caption_row, hint_row = (112, 142) if self.profile == Profile.LARGE else (110, 136.75)
     source_color = rl.Color(197, 212, 208, 255)
     if current_status:
       source += f' / {current_status}'
-    label_size = 22 * min(1, (width - 40) / max(1, ink_width(source, 22, FontRole.SEMI_BOLD)))
+    label_size = HEADING_SIZE * min(1, (width - 40) / max(1, ink_width(source, HEADING_SIZE, FontRole.SEMI_BOLD)))
     label_width = ink_width(source, label_size, FontRole.SEMI_BOLD)
     target = state.speed_limit.pending_adjusted_limit_mps
     if not positive(target):
       target = displayed_adjusted_limit_mps(state.speed_limit)
     direction = (-1 if target > state.speed_mps else 1) if target is not None and state.speed_mps is not None and target != state.speed_mps else 0
     start = (width - label_width - (19.2 if direction else 0)) / 2
-    text(source, label_size, start + label_width / 2, 22, source_color, FontRole.SEMI_BOLD)
+    draw_speed_row(self.fonts, source, FontRole.SEMI_BOLD, text_size(label_size),
+                   x + (start + label_width / 2) * scale, content_top + HEADING_ROW * scale, source_color, 'H')
     if direction:
-      self.shapes.arrow('compact', x + (start + label_width + 12.6) * scale, y + 22.5 * scale,
+      self.shapes.arrow('compact', x + (start + label_width + 12.6) * scale, content_top + (HEADING_ROW + .5) * scale,
                         direction, source_color, scale=1.1 * scale)
-    nw = ink_width(shown.posted_text, 64, FontRole.BOLD)
+    nw = ink_width(shown.posted_text, NUMBER_SIZE, FontRole.SET_SPEED)
     ow = ink_width(shown.offset_text, 32) if shown.offset_text else 0
     start = (width - nw - (10 + ow if ow else 0)) / 2
-    # Align the posted value and offset at their visible lower edge.
-    number_top, number_bottom = self.fonts.vertical_ink(shown.posted_text, FontRole.BOLD, text_size(64))
-    text(shown.posted_text, 64, start + nw / 2, 84 - (number_bottom - number_top) / scale / 2, white, FontRole.BOLD)
+    draw_speed_row(self.fonts, shown.posted_text, FontRole.SET_SPEED, text_size(NUMBER_SIZE),
+                   x + (start + nw / 2) * scale, content_top + NUMBER_ROW * scale, white, '0123456789')
     if ow:
       offset_text = cast(str, shown.offset_text)
+      ref_top, ref_bottom = self.fonts.vertical_ink('0123456789', FontRole.SET_SPEED, text_size(NUMBER_SIZE))
+      _, ink_bottom = self.fonts.vertical_ink(shown.posted_text, FontRole.SET_SPEED, text_size(NUMBER_SIZE))
+      number_bottom = row_origin + NUMBER_ROW + (ink_bottom - (ref_top + ref_bottom) / 2) / scale
       top, bottom = self.fonts.vertical_ink(offset_text, FontRole.MEDIUM, text_size(32))
-      text(offset_text, 32, start + nw + 10 + ow / 2, 84 - (bottom - top) / scale / 2, secondary)
-    label = 'New Limit' if slc_accept_available(state) else 'Unavailable'
+      text(offset_text, 32, start + nw + 10 + ow / 2, number_bottom - (bottom - top) / scale / 2, secondary)
+    label = 'NEW LIMIT' if slc_accept_available(state) else 'Unavailable'
     caption = ink_width(label, 30, FontRole.SEMI_BOLD)
     cx = (width - caption - 10) / 2
     strength = self.pulse.confirmation_strength(now)
     accent = rl.Color(214, round(188 + 35 * strength), 240, 255)
-    text(label, 30, cx + caption / 2, 104, accent, FontRole.SEMI_BOLD)
-    ax, ay = x + (cx + caption + 8) * scale, y + 104 * scale
+    text(label, 30, cx + caption / 2, row_origin + caption_row, accent, FontRole.SEMI_BOLD)
+    ax, ay = x + (cx + caption + 8) * scale, content_top + caption_row * scale
     draw_line(self.profile, rl.Vector2(ax - 2 * scale, ay - 4 * scale), rl.Vector2(ax + 2 * scale, ay), 1.5 * scale, accent)
     draw_line(self.profile, rl.Vector2(ax + 2 * scale, ay), rl.Vector2(ax - 2 * scale, ay + 4 * scale), 1.5 * scale, accent)
     if state.slc_wheel_confirmation_available:
-      accept, reject = ink_width('Accept', 26), ink_width('Reject', 26)
+      hint_size = 23
+      accept, reject = ink_width('ACCEPT', hint_size), ink_width('REJECT', hint_size)
       start = (width - 18 - 4 - accept - 10 - 18 - 4 - reject) / 2
       for left, plus in ((start, True), (start + 18 + 4 + accept + 10, False)):
-        self.shapes.wheel_key(plus, x + (left + 9) * scale, y + 135.5 * scale, scale=scale)
+        self.shapes.wheel_key(plus, x + (left + 9) * scale, content_top + hint_row * scale, scale=scale)
       hint_ink = rl.Color(210, 216, 216, 255)
-      text('Accept', 26, start + 22 + accept / 2, 135.5, hint_ink if slc_accept_available(state) else MUTED)
-      text('Reject', 26, start + 18 + 4 + accept + 10 + 22 + reject / 2, 135.5, hint_ink)
+      text('ACCEPT', hint_size, start + 22 + accept / 2, row_origin + hint_row, hint_ink if slc_accept_available(state) else MUTED)
+      text('REJECT', hint_size, start + 18 + 4 + accept + 10 + 22 + reject / 2, row_origin + hint_row, hint_ink)
     else:
-      text('Tap to review', 22, width / 2, 135.5, secondary)
+      text('Tap to review', 22, width / 2, row_origin + hint_row, secondary)
 
   def _sign(self, state: OnroadState, bounds, now: float) -> None:
     shown, obs = resolve_unified_speed(state), state.speed_limit
@@ -282,21 +291,24 @@ class SpeedLimitWidget:
       label = 'Override' if shown.override_text is not None else 'Limit'
       active_text = active_text or shown.slc_target_text or shown.posted_text
       target_rows = (('Pedal', FontRole.SEMI_BOLD, 44, 68, OVERRIDE),) if pedal else (
-          (label, FontRole.SEMI_BOLD, 34, 25, OVERRIDE if label == 'Override' else white),
-          (active_text, FontRole.SET_SPEED if self.profile == Profile.LARGE else FontRole.BOLD, 64, 68, white))
+          (label, FontRole.SEMI_BOLD, HEADING_SIZE, HEADING_ROW, OVERRIDE if label == 'Override' else white),
+          (active_text, FontRole.SET_SPEED, NUMBER_SIZE, NUMBER_ROW, white))
       posted = shown.posted_text + (f' {shown.offset_text}' if shown.offset_text else '')
       detail = f'{heading} {posted}' if pedal or shown.override_text is not None or active_text != shown.posted_text else heading
       left, right, _, _ = ink(detail, FontRole.MEDIUM, 22)
-      source_rows = ((detail, FontRole.MEDIUM, 22, 120, secondary),) if detail == heading or right - left <= 108 else (
-          (heading, FontRole.SEMI_BOLD, 18, 104, secondary), (posted, FontRole.MEDIUM, 20, 125, secondary))
+      source_rows = ((detail, FontRole.MEDIUM, 22, SOURCE_ROW, secondary),) if detail == heading or right - left <= 108 else (
+          (heading, FontRole.SEMI_BOLD, 18, 106, secondary), (posted, FontRole.MEDIUM, 20, 125, secondary))
       for value, role, size, cy, color in (*target_rows, *source_rows):
         left, right, _, _ = ink(value, role, size)
         size *= min(1, 108 / max(1, right - left))
         _, _, a, b = ink(value, role, size)
-        centered(value, role, size, cy - (b - a) / 2, color)
+        if role == FontRole.SET_SPEED or value in ('Limit', 'Override'):
+          draw_speed_row(self.fonts, value, role, size * self.text_scale, x + center_x * scale, top + cy * scale,
+                         color, '0123456789' if role == FontRole.SET_SPEED else 'H')
+        else:
+          centered(value, role, size, cy - (b - a) / 2, color)
       return
 
-    large_steady = self.profile == Profile.LARGE and not vienna and not shown.pending
     color = white
     if vienna:
       x, top = x + 5 * scale, top + 5 * scale
@@ -305,7 +317,7 @@ class SpeedLimitWidget:
     else:
       self.shapes.outline(x + center_x * scale, top + sign_center_y * scale, IN_USE if shown.limit_in_use else white)
 
-    heading_size = 28 if not vienna else 18
+    heading_size = HEADING_SIZE if not vienna else 18
     if vienna and self.profile == Profile.LARGE and not shown.pending:
       heading_size = 21
     left, right, a, b = ink(heading, FontRole.SEMI_BOLD, heading_size)
@@ -314,7 +326,7 @@ class SpeedLimitWidget:
       left, right, a, b = ink(heading, FontRole.SEMI_BOLD, heading_size)
     # Lift the Vienna stack to keep the offset clear of the bottom rim.
     lift = (12 if shown.limit_in_use else 7 if shown.offset_text else 2) if vienna else 0
-    header_y = 47 - lift if vienna else 26
+    header_y = 47 - lift if vienna else HEADING_ROW
     arrow_scale = 1.
     if vienna:
       # Fit the heading and arrow inside the circle at the top of their ink.
@@ -335,10 +347,10 @@ class SpeedLimitWidget:
       self.shapes.arrow('compact', round(x + (header_left + heading_width + 6 + arrow_width / 2) * scale),
                         round(top + header_y * scale), arrow_direction, color, scale=scale * arrow_scale)
 
-    role = FontRole.SET_SPEED if large_steady else FontRole.BOLD
-    size = 58 if vienna else 64
+    role = FontRole.BOLD if vienna else FontRole.SET_SPEED
+    size = 58 if vienna else NUMBER_SIZE
     offset_size = 30 if vienna else 27
-    number_center = (73 if shown.offset_text else 80) - lift if vienna else (68 if shown.offset_text else 80)
+    number_center = (73 if shown.offset_text else 80) - lift if vienna else NUMBER_ROW
     while True:
       left, right, a, b = ink(shown.posted_text, role, size)
       width, height = right - left, b - a
@@ -356,7 +368,11 @@ class SpeedLimitWidget:
       size *= .95
       if vienna:
         offset_size *= .95
-    centered(shown.posted_text, role, size, number_top, color)
+    if vienna:
+      centered(shown.posted_text, role, size, number_top, color)
+    else:
+      draw_speed_row(self.fonts, shown.posted_text, role, size * self.text_scale, x + center_x * scale,
+                     top + NUMBER_ROW * scale, color, '0123456789')
     if shown.offset_text:
       if not vienna:
         left, right, a, b = ink(shown.offset_text, FontRole.MEDIUM, offset_size)

@@ -255,6 +255,15 @@ class ForceStopTests(unittest.TestCase):
     plan = self.owner.step(frame(16, horizon_m=60., light=False), self.tune)
     self.assertLess(plan.tracked_distance_m, 27.)
 
+  def test_long_path_sign_needing_a_hard_stop_is_ignored(self):
+    for tick in range(15):
+      plan = self.owner.step(frame(tick, speed_mps=13., horizon_m=90.), self.tune)
+    self.assertTrue(plan.forcing)
+    for tick in range(15, 55):
+      plan = self.owner.step(frame(tick, speed_mps=13., horizon_m=90., sign=True, dashboard_sign=True), self.tune)
+      self.assertFalse(self.owner.sign_confirmed)
+      self.assertGreater(plan.tracked_distance_m, 50.)
+
   def test_long_path_sign_alone_does_not_commit(self):
     for tick in range(20):
       plan = self.owner.step(frame(tick, horizon_m=60., light=False, sign=True), self.tune)

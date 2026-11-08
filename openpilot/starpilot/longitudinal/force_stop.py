@@ -13,6 +13,8 @@ SIGN_MAX_SPEED_MPS = 17.88
 SIGN_MODEL_AGREE_M = 50.0
 SIGN_SEED_M = 27.0
 SIGN_ESTIMATE_HOLD_NS = 2_000_000_000
+# Over a long model path a sign is only believed if stopping at its estimate would be a normal stop.
+SIGN_LONG_PATH_MAX_DECEL = 2.5
 SIGN_APPROACH_DECEL = 1.0
 MODEL_APPROACH_DECEL = .65
 # Stopped behind a car at a sign: the line is assumed one car length past that car's rear.
@@ -195,7 +197,9 @@ class ForceStop:
     permitted = (available and now >= self.override_until_ns and not frame.driving_in_curve and not turn and
                  not frame.tracking_lead and not lead)
     model_path = frame.light and model_active and permitted and not curved
-    sign_path = frame.sign and permitted and speed < SIGN_MAX_SPEED_MPS and (horizon < SIGN_MODEL_AGREE_M or self.forcing)
+    plausible = sign_estimate is None or speed * speed <= 2 * SIGN_LONG_PATH_MAX_DECEL * max(sign_estimate, 1.0)
+    sign_path = (frame.sign and permitted and speed < SIGN_MAX_SPEED_MPS and
+                 (horizon < SIGN_MODEL_AGREE_M or self.forcing and plausible))
     line_blocked = (self.queue_line is not None and frame.lead_present and
                     frame.lead_distance_m < self.queue_line + QUEUE_CLEAR_M)
     queue_path = (self.queue_line is not None and not line_blocked and not frame.standstill and available and

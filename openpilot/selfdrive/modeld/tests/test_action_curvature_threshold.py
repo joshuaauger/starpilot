@@ -25,7 +25,7 @@ def action_function():
 def test_action_curvature_low_speed_threshold(speed):
   previous = log.ModelDataV2.Action(desiredCurvature=0.01, desiredAcceleration=0.1)
   action = action_function()({"action": np.array([[0.25, 0.5]])}, previous, 0.2, 0.2, speed)
-  expected = smooth_value(0.25 / max(2.5, speed) ** 2, 0.01, LAT_SMOOTH_SECONDS) if speed > 0.3 else 0.01
+  expected = smooth_value(0.25 / max(1.0, speed) ** 2, 0.01, LAT_SMOOTH_SECONDS) if speed > 0.3 else 0.01
   assert action.desiredCurvature == pytest.approx(expected)
   assert action.desiredAcceleration == pytest.approx(smooth_value(0.5, 0.1, 0.3))
   assert not action.shouldStop

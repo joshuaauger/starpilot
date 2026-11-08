@@ -12,6 +12,7 @@ SIGN_CONFIRM_STEP_S = 2 * DT_MDL
 SIGN_MAX_SPEED_MPS = 17.88
 SIGN_MODEL_AGREE_M = 50.0
 SIGN_SEED_M = 27.0
+SIGN_ESTIMATE_HOLD_NS = 2_000_000_000
 SIGN_APPROACH_DECEL = 1.0
 MODEL_APPROACH_DECEL = .65
 
@@ -58,6 +59,8 @@ class StopFrame:
   resume_requested: bool = False
   perception_available: bool = True
   sign: bool = False
+  dashboard_sign: bool = False
+  vision_distance_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,32 @@ class ForceStop:
     self.previously_enabled = False
     self.distance = 0.0
     self.distance_cap = 0.0
+    self._clear_sign_estimate()
+
+  def _clear_sign_estimate(self):
+    self.dash_distance = None
+    self.vision_distance = None
+    self.vision_samples = 0
+    self.sign_evidence_ns = 0
+
+  def _sign_estimate(self, frame: StopFrame, now: int, travel: float) -> float | None:
+    if self.sign_evidence_ns and now - self.sign_evidence_ns > SIGN_ESTIMATE_HOLD_NS:
+      self._clear_sign_estimate()
+    if self.dash_distance is not None:
+      self.dash_distance = max(0.0, self.dash_distance - travel)
+    if self.vision_distance is not None:
+      self.vision_distance = max(0.0, self.vision_distance - travel)
+    vision = frame.vision_distance_m
+    if vision is not None and math.isfinite(vision) and vision >= 0:
+      self.vision_samples += 1
+      self.vision_distance = vision if self.vision_distance is None else (
+        self.vision_distance + (vision - self.vision_distance) / self.vision_samples)
+    if frame.dashboard_sign or frame.sign and self.vision_distance is None:
+      self.dash_distance = SIGN_SEED_M if self.dash_distance is None else min(self.dash_distance, SIGN_SEED_M)
+    if frame.sign or vision is not None:
+      self.sign_evidence_ns = now
+    estimates = [value for value in (self.dash_distance, self.vision_distance) if value is not None]
+    return sum(estimates) / len(estimates) if estimates else None
 
   def _clear_standstill(self):
     self.standstill_since_ns = 0
@@ -127,6 +156,7 @@ class ForceStop:
       self.reset()
       return StopPlan()
     available = frame.perception_available
+    sign_estimate = self._sign_estimate(frame, now, max(0.0, speed) * dt)
     if available and (frame.light or frame.raw_model_stopped) or frame.sign:
       if not frame.standstill:
         self.stop_seen_ns = now
@@ -230,10 +260,10 @@ class ForceStop:
         elif available:
           self.distance = min(self.distance, horizon)
         self.distance_cap = max(0.0, self.distance_cap - speed * dt)
-        self.distance = min(self.distance, self.distance_cap + 15 * min(self.distance_cap / 60, 1))
-        if frame.sign and available:
-          if horizon < SIGN_MODEL_AGREE_M or self.sign_confirmed:
-            self.distance = min(self.distance, SIGN_SEED_M)
+        cap = self.distance_cap + 15 * min(self.distance_cap / 60, 1)
+        self.distance = min(self.distance, cap)
+        if sign_estimate is not None and (self.sign_confirmed or frame.sign and available and horizon < SIGN_MODEL_AGREE_M):
+          self.distance = min(sign_estimate, cap)
         effective = self.distance + offset + tune.distance_bias_m
         decel = SIGN_APPROACH_DECEL if frame.sign else MODEL_APPROACH_DECEL
         ceiling = math.sqrt(2 * decel * max(0, effective - tune.handoff_m))

@@ -261,6 +261,34 @@ class ForceStopTests(unittest.TestCase):
     self.assertFalse(plan.forcing)
     self.assertFalse(self.owner.sign_confirmed)
 
+  def test_vision_distance_replaces_assumed_sign_distance(self):
+    for tick in range(15):
+      plan = self.owner.step(frame(tick, horizon_m=60.), self.tune)
+    plan = self.owner.step(frame(15, horizon_m=60., sign=True, vision_distance_m=35.), self.tune)
+    self.assertTrue(self.owner.sign_confirmed)
+    self.assertAlmostEqual(plan.tracked_distance_m, 35.)
+    plan = self.owner.step(frame(16, horizon_m=60., sign=True), self.tune)
+    self.assertAlmostEqual(plan.tracked_distance_m, 34.5)
+    plan = self.owner.step(frame(17, horizon_m=60., sign=True, vision_distance_m=31.), self.tune)
+    self.assertAlmostEqual(plan.tracked_distance_m, 32.5)
+
+  def test_dashboard_and_vision_distances_are_averaged(self):
+    for tick in range(15):
+      self.owner.step(frame(tick, horizon_m=60.), self.tune)
+    plan = self.owner.step(frame(15, horizon_m=60., sign=True, dashboard_sign=True), self.tune)
+    self.assertAlmostEqual(plan.tracked_distance_m, 27.)
+    plan = self.owner.step(frame(16, horizon_m=60., sign=True, dashboard_sign=True, vision_distance_m=35.), self.tune)
+    self.assertAlmostEqual(plan.tracked_distance_m, (26.5 + 35.) / 2)
+
+  def test_sign_distance_expires_without_evidence_and_never_jumps_back(self):
+    for tick in range(15):
+      self.owner.step(frame(tick, horizon_m=60.), self.tune)
+    self.owner.step(frame(15, horizon_m=60., sign=True, vision_distance_m=30.), self.tune)
+    for tick in range(16, 70):
+      plan = self.owner.step(frame(tick, speed_mps=4., horizon_m=60., light=True), self.tune)
+      self.assertLess(plan.tracked_distance_m, 30.)
+    self.assertIsNone(self.owner.vision_distance)
+
   def test_positive_offset_keeps_stop_target_until_native_stop(self):
     for tick in range(40):
       plan = self.owner.step(frame(tick, horizon_m=12.), self.tune, 8)

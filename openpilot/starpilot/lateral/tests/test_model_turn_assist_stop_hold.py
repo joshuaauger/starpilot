@@ -59,6 +59,18 @@ class TestStopHold(unittest.TestCase):
     assist.curvature = .009
     self.assertEqual(step(assist, .6, -2.0, .015), -.003)
 
+  def test_latches_guarded_command_not_raw_model(self):
+    assist = ModelTurnAssist()
+    assist.twitch_guard_armed = True
+    self.assertEqual(step(assist, 1.0, 0., .012, model=LONG_STRAIGHT), TWITCH_GUARD_FLOOR)
+    self.assertEqual(step(assist, .6, -2.0, .012, model=LONG_STRAIGHT), TWITCH_GUARD_FLOOR)
+
+  def test_does_not_freeze_a_turn_in_progress(self):
+    assist = ModelTurnAssist()
+    assist.curvature = .02
+    self.assertEqual(step(assist, 1.0, -2.0, .04), .04)
+    self.assertIsNone(assist.stop_hold_curvature)
+
 
 class TestTwitchGuardArming(unittest.TestCase):
   def test_armed_from_standstill_until_max_speed(self):
@@ -79,6 +91,22 @@ class TestTwitchGuardArming(unittest.TestCase):
   def test_unarmed_guard_leaves_creep_command(self):
     assist = ModelTurnAssist()
     self.assertEqual(step(assist, 1.0, 0., .012, model=LONG_STRAIGHT), .012)
+
+  def test_stop_approach_arms_guard_only_with_straight_wheel(self):
+    assist = ModelTurnAssist()
+    self.assertEqual(step(assist, 3.0, -1.5, .012, model=LONG_STRAIGHT), TWITCH_GUARD_FLOOR)
+    assist = ModelTurnAssist()
+    assist.curvature = .006
+    self.assertEqual(step(assist, 3.0, -1.5, .012, model=LONG_STRAIGHT), .012)
+    assist = ModelTurnAssist()
+    self.assertEqual(step(assist, 3.0, -.2, .012, model=LONG_STRAIGHT), .012)
+
+  def test_blinker_disarms_guard(self):
+    assist = ModelTurnAssist()
+    assist.twitch_guard_armed = True
+    step(assist, 2.0, 0., .012, model=LONG_STRAIGHT, blinker=1)
+    self.assertFalse(assist.twitch_guard_armed)
+    self.assertEqual(step(assist, 2.0, 0., .012, model=LONG_STRAIGHT), .012)
 
 
 if __name__ == '__main__':

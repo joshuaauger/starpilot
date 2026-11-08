@@ -37,6 +37,8 @@ STOP_HOLD_MAX_SPEED = 2.5
 STOP_HOLD_DIST = 1.5
 STOP_HOLD_RELEASE_DIST = 3.0
 STOP_HOLD_MIN_DECEL = 0.3
+STOP_HOLD_MAX_CURVATURE = 0.01
+STOP_GUARD_DIST = 5.0
 
 
 def _plan_circle_curvature(xs, ys, lookahead: float) -> float:
@@ -129,8 +131,8 @@ def update_twitch_guard(armed: bool, v_ego: float, standstill: bool) -> bool:
   return armed and v_ego < TWITCH_GUARD_MAX_SPEED
 
 
-def stopping_distance(v_ego: float, a_ego: float) -> float:
-  if not (math.isfinite(v_ego) and math.isfinite(a_ego)) or v_ego >= STOP_HOLD_MAX_SPEED:
+def stopping_distance(v_ego: float, a_ego: float, max_speed: float = STOP_HOLD_MAX_SPEED) -> float:
+  if not (math.isfinite(v_ego) and math.isfinite(a_ego)) or v_ego >= max_speed:
     return math.inf
   return v_ego ** 2 / (2.0 * max(-a_ego, 0.01))
 TURN_LEAD_T = 1.3
@@ -160,19 +162,30 @@ class ModelTurnAssist:
     self.turn_blinker_swept = 0.0
     self.twitch_guard_armed = False
     self.stop_hold_curvature = None
+    self.output_curvature = None
     self.curvature = 0.0
     self.turn_hold_done = False
 
   def update(self, CS, model_v2, CC, new_desired_curvature):
     blinker_dir = float(CS.rightBlinker) - float(CS.leftBlinker)
     stop_dist = stopping_distance(CS.vEgo, CS.aEgo)
-    entering = CS.aEgo < -STOP_HOLD_MIN_DECEL and stop_dist < STOP_HOLD_DIST
+    entering = CS.aEgo < -STOP_HOLD_MIN_DECEL and stop_dist < STOP_HOLD_DIST and abs(self.curvature) < STOP_HOLD_MAX_CURVATURE
     holding = self.stop_hold_curvature is not None and stop_dist < STOP_HOLD_RELEASE_DIST
+    if blinker_dir != 0.0:
+      self.twitch_guard_armed = False
+    elif (CS.aEgo < -STOP_HOLD_MIN_DECEL and abs(self.curvature) < TWITCH_GUARD_STRAIGHT_LO and
+          stopping_distance(CS.vEgo, CS.aEgo, TWITCH_GUARD_MAX_SPEED) < STOP_GUARD_DIST):
+      self.twitch_guard_armed = True
     if CC.latActive and blinker_dir == 0.0 and self.turn_hold_curvature == 0.0 and (entering or holding):
       if CS.steeringPressed:
         self.stop_hold_curvature = self.curvature
       elif self.stop_hold_curvature is None:
-        self.stop_hold_curvature = new_desired_curvature
+        if self.output_curvature is not None:
+          self.stop_hold_curvature = self.output_curvature
+        elif self.twitch_guard_armed:
+          self.stop_hold_curvature = limit_curvature_to_plan(model_v2, new_desired_curvature, CS.vEgo)
+        else:
+          self.stop_hold_curvature = new_desired_curvature
       new_desired_curvature = self.stop_hold_curvature
       self.twitch_guard_armed = True
     else:
@@ -272,6 +285,7 @@ class ModelTurnAssist:
           if CS.vEgo < CURVATURE_HOLD_RELEASE_SPEED and (not self.turn_hold_done) and (lead_curvature * blinker_dir > abs(self.turn_hold_curvature)):
             held_mag = min(lead_curvature * blinker_dir, abs(self.turn_hold_curvature) + CURVATURE_HOLD_RATCHET_RATE * DT_CTRL)
             self.turn_hold_curvature = math.copysign(held_mag, lead_curvature)
+    self.output_curvature = new_desired_curvature
     return new_desired_curvature
 
 

@@ -105,22 +105,55 @@ def test_engagement_matching_requires_an_enabled_saved_toggle(tmp_path, raw, mat
 
 @pytest.mark.parametrize('resume', [False, True])
 @pytest.mark.parametrize('live', [False, True])
-def test_match_on_engage_uses_saved_history_as_a_fallback(resume, live):
-  runtime, sm, cp = drive()
-  previous = AcceptedLimit(Candidate('map', ObservationIdentity(IdentityKind.GEOGRAPHIC, value='old-road'), 25 * CV.MPH_TO_MS),
+@pytest.mark.parametrize('metric', [False, True])
+@pytest.mark.parametrize('v_ego,initial_speed,normal_kph', [(20., 40, 72.), (0., 40, 40.), (10., 100, 100.)])
+def test_engagement_ignores_previous_drive_limit_and_preserves_resume(resume, live, metric, v_ego, initial_speed, normal_kph):
+  runtime, sm, cp = drive(metric=metric)
+  units = CV.KPH_TO_MS if metric else CV.MPH_TO_MS
+  previous = AcceptedLimit(Candidate('map', ObservationIdentity(IdentityKind.GEOGRAPHIC, value='old-road'), 25 * units),
                            'previous-drive', 0)
   runtime = Runtime(runtime.settings, previous_limit=previous)
+  sm['carState'].vEgo = sm['carState'].vEgoCluster = v_ego
   if not live:
     sm['slcDashboardObservation'].status = 'unknown'
   prepared = runtime.step(sm, cp, now_ns=START).message.slcState
   assert prepared.hasAcceptedAdjustedLimit and prepared.hasPresentationAdjustedLimit == live
+  assert prepared.acceptedMonoTime == 0
   sm.data['slcState'] = prepared
-  instance = owner(sm, cp, resume=resume)
+  instance = owner(sm, cp, metric=metric, resume=resume)
+  instance.initial_cruise_speed = initial_speed
   if resume:
     instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
   engage(instance)
-  assert instance.v_cruise_helper.v_cruise_kph == (105. if resume else 80.5 if live else 48.3)
+  matched_kph = 50. if metric else 80.5
+  assert instance.v_cruise_helper.v_cruise_kph == (105. if resume else matched_kph if live else normal_kph)
   assert bool(instance.slc_receipts) == (live and not resume)
+
+
+@pytest.mark.parametrize('resume', [False, True])
+@pytest.mark.parametrize('metric', [False, True])
+def test_reengagement_keeps_this_session_accepted_limit_during_a_source_gap(resume, metric):
+  runtime, sm, cp = drive(metric=metric)
+  instance = owner(sm, cp, metric=metric, resume=resume)
+  engage(instance)
+  accepted = runtime.step(sm, cp, now_ns=START + 10_000_000, cruise_event=receipt(instance)).message.slcState
+  assert accepted.acceptedMonoTime > 0
+
+  sm['carControl'].enabled = sm['carControl'].longActive = False
+  sm['slcDashboardObservation'].status = 'unknown'
+  sm['carState'].vCruise = sm['carState'].vCruiseCluster = 105.
+  instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
+  gap_ns = START + 20_000_000
+  sm.advance(gap_ns)
+  gap = runtime.step(sm, cp, now_ns=gap_ns).message.slcState
+  assert gap.observationKind != 'valid' and gap.acceptedMonoTime == accepted.acceptedMonoTime
+  sm.data['slcState'] = gap
+  instance.slc_receipts.clear()
+
+  engage(instance, now=gap_ns + 10_000_000)
+
+  assert instance.v_cruise_helper.v_cruise_kph == (105. if resume else 50. if metric else 80.5)
+  assert not instance.slc_receipts
 
 
 def test_new_dashboard_packet_in_same_episode_matches_set_over_saved_history():

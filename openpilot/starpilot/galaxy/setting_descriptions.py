@@ -63,7 +63,9 @@ DESCRIPTIONS = {
   'ShowCSCStatus': 'Shows when Curve Speed Controller is adjusting speed on the driving screen.',
   'curve_reset': 'Deletes saved cornering learning so Curve Speed Controller can learn your preferences again.',
   'SpeedLimitController': 'Follows accepted limits plus offsets up to SET speed. Missing data uses the previous accepted limit.',
-  'SLCOnEngage': 'Starts software cruise SET at the SLC limit plus offset, including a saved limit when live data is missing. RES restores the previous SET.',
+  'SLCOnEngage': ('Starts software cruise SET at the SLC limit plus offset. ' +
+                  'A limit accepted this session remains available during data gaps. Previous-drive history does not initialize SET. ' +
+                  'RES restores the previous SET.'),
   'SLCOverrideMode': ('Cruise uses this target when you lift off the accelerator. ' +
                       'Holding your speed uses the highest speed you reached, up to SET.'),
   'SLCWheelOverride': 'Press + to raise SET past the adjusted limit and use your new SET speed.',

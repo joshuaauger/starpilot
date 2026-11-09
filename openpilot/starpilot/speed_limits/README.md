@@ -11,9 +11,11 @@ SLC works with either the StarPilot or upstream longitudinal planner.
 ## New limits and adoption
 
 **Match Speed Limit on Engage** is Off by default. When enabled, a new software SET
-engagement uses the SLC limit plus its offset, including a saved accepted limit
-during a source gap. A fresh reading takes priority over history from another
-drive. A fresh SET can adopt the qualified current limit over one accepted
+engagement uses the SLC limit plus its offset. A limit accepted in this runtime
+session remains available during a source gap. Restored history from a previous
+drive or runtime restart never initializes SET; without an eligible limit, ordinary
+SET initialization uses current vehicle speed or the configured initial minimum,
+whichever is higher. A fresh SET can adopt the qualified current limit over one accepted
 earlier in this drive when both the posted limit and the offset-adjusted target
 are lower. This applies after an earlier timeout or explicit decline. Otherwise,
 a different reading leaves the same-drive accepted limit as the SET target.

@@ -30,9 +30,10 @@ def test_saved_previous_limit_caps_native_planner_after_restart_without_a_curren
   assert target == pytest.approx(45, abs=1e-4)
   assert output.message.slcState.observationKind != 'valid'
   assert output.message.slcState.presentationId == 0
+  assert output.message.slcState.acceptedMonoTime == 0
   assert output.message.slcState.hasCeiling and not output.message.slcState.hasPending
   shown = resolve_unified_speed(view)
-  assert (shown.posted_text, shown.status) == ('45', 'Unavailable')
+  assert (shown.posted_text, shown.status) == ('45', 'Using speed limit')
   assert shown.source == source
 
   proposed, _, target = drive.step(1050, limit=50)

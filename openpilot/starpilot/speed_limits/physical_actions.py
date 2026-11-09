@@ -107,10 +107,9 @@ def engagement_target(sm, observation, producer_session: str, now_ns: int, *, af
   # Offset bands can make a lower posted limit raise SET.
   lower_match = (current is not None and current.speedLimit < state.acceptedSpeedLimit and
                  current.presentationAdjustedLimit < state.acceptedAdjustedLimit)
-  # A live reading outranks restored history, whose adoption time is zero.
-  if state.hasAccepted and not state.acceptedIsPreview and state.hasAcceptedAdjustedLimit and (
-      current is None or
-      state.acceptedMonoTime > 0 and state.acceptedSpeedLimit != current.speedLimit and not lower_match):
+  # Restored history has no adoption time and must not initialize SET.
+  if (state.hasAccepted and state.acceptedMonoTime > 0 and not state.acceptedIsPreview and state.hasAcceptedAdjustedLimit and
+      (current is None or state.acceptedSpeedLimit != current.speedLimit and not lower_match)):
     return float(state.acceptedAdjustedLimit), None
   return (float(current.presentationAdjustedLimit), current) if current is not None else (None, None)
 

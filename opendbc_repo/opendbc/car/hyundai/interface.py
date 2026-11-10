@@ -142,10 +142,8 @@ class CarInterface(CarInterfaceBase):
       CAN = CanBus(None, fingerprint, lka_steering)
 
       ret.alphaLongitudinalAvailable = not (ret.flags & HyundaiFlags.CANFD_NO_RADAR_DISABLE)
-      if not lka_steering and not ret.flags & HyundaiFlags.CANFD_RADAR_SCC:
-        # Camera-SCC (HDA I) topology: longitudinal control intercepts the camera's SCC
-        # messages and never sends the communication-control disable that
-        # CANFD_NO_RADAR_DISABLE platforms refuse (see init_), so the refusal is moot.
+      if (candidate == CAR.HYUNDAI_IONIQ_6 and not lka_steering and
+          fingerprint[CAN.CAM].get(0x1A0) == 32 and fingerprint[CAN.ECAN].get(0x1CF) == 8):
         ret.alphaLongitudinalAvailable = True
       if ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
         # These manual angle profiles retain stock SCC in both builds.

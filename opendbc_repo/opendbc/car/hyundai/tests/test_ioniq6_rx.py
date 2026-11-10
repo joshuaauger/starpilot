@@ -38,9 +38,7 @@ class TestIoniq6ReceiveOnly(unittest.TestCase):
           self.assertEqual(cp.radarUnavailable, observed_bus != expected_bus or length != 24)
           self.assertFalse(cp.openpilotLongitudinalControl)
           self.assertTrue(cp.pcmCruise)
-          # Camera-SCC (HDA I) long control never sends the refused communication-control
-          # disable, so availability is topology-bound rather than platform-bound.
-          self.assertEqual(cp.alphaLongitudinalAvailable, topology == "camera")
+          self.assertFalse(cp.alphaLongitudinalAvailable)
           self.assertEqual(bool(cp.flags & HyundaiFlags.CANFD_CAMERA_SCC), topology == "camera")
 
   def test_mrr35_real_packed_cycle_with_missing_and_delayed_tracks(self):

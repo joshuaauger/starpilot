@@ -1,0 +1,93 @@
+name: sync upstream
+
+# Tracks StarPilotHQ/StarPilot and incorporates changes automatically:
+#  - mirrors upstream branches (Dom) into this fork
+#  - merges upstream's default branch into this fork's default branch
+#  - merges Dom into the working branch; opens a PR instead when there are conflicts
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'  # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/StarPilotHQ/StarPilot.git
+  DEFAULT_BRANCH: StarPilot
+  MIRROR_BRANCHES: Dom SecretGoodStarPilot
+  WORK_BRANCH: codex/ioniq6-hda1-alpha-long
+  MERGE_FROM: Dom
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git and fetch upstream
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream --prune
+          git fetch origin --prune
+
+      - name: Mirror upstream branches into fork
+        run: |
+          for b in $MIRROR_BRANCHES; do
+            if git show-ref --verify --quiet "refs/remotes/upstream/$b"; then
+              # exact mirror: fork copies of upstream branches follow upstream, even on force-push
+              git push --force origin "refs/remotes/upstream/$b:refs/heads/$b"
+            else
+              echo "upstream branch $b not found, skipping"
+            fi
+          done
+
+      - name: Merge upstream default branch into fork default branch
+        run: |
+          # merge (not force) so fork-only commits like this workflow survive
+          git checkout -B "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"
+          if git merge --no-edit "upstream/$DEFAULT_BRANCH"; then
+            git push origin "$DEFAULT_BRANCH"
+          else
+            git merge --abort
+            echo "::warning::conflict merging upstream/$DEFAULT_BRANCH into $DEFAULT_BRANCH; left untouched"
+          fi
+
+      - name: Merge upstream into working branch
+        id: work
+        run: |
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$WORK_BRANCH"; then
+            echo "working branch $WORK_BRANCH not found, skipping"
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git checkout -B "$WORK_BRANCH" "origin/$WORK_BRANCH"
+          if git merge --no-edit "upstream/$MERGE_FROM"; then
+            git push origin "$WORK_BRANCH"
+            echo "result=merged" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open PR on merge conflict
+        if: steps.work.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # PR from the mirrored upstream branch; GitHub UI shows the conflicts to resolve
+          gh pr create --repo "$GITHUB_REPOSITORY" \
+            --base "$WORK_BRANCH" --head "$MERGE_FROM" \
+            --title "Upstream sync: $MERGE_FROM -> $WORK_BRANCH (conflicts)" \
+            --body "Automatic merge of upstream \`$MERGE_FROM\` into \`$WORK_BRANCH\` hit conflicts. Resolve and merge this PR, or merge locally and push." \
+            2>&1 | grep -v "already exists" || true
